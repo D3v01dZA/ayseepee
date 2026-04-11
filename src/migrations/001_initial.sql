@@ -4,7 +4,7 @@ CREATE TABLE workspaces (
   cwd TEXT NOT NULL,
   allowed_tools TEXT,
   system_prompt TEXT,
-  permission_mode TEXT NOT NULL DEFAULT 'bypassPermissions',
+  permission_mode TEXT NOT NULL DEFAULT 'default',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

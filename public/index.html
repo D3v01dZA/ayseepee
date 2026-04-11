@@ -74,12 +74,30 @@
 
   /* Dialogs */
   .dialog-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
-  .dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 400px; max-width: 90vw; }
+  .dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 400px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; }
+  .dialog.wide { width: 550px; }
   .dialog h3 { font-size: 15px; margin-bottom: 16px; }
   .dialog label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 4px; margin-top: 12px; }
   .dialog input, .dialog select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
   .dialog .actions { margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end; }
   .hidden { display: none !important; }
+
+  /* File picker */
+  .filepicker { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); margin-top: 8px; max-height: 350px; min-height: 150px; display: flex; flex-direction: column; overflow: hidden; }
+  .filepicker-path { font-family: var(--mono); font-size: 12px; color: var(--text-dim); padding: 6px 10px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+  .filepicker-crumbs { display: flex; align-items: center; gap: 2px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .filepicker-crumbs span { cursor: pointer; color: var(--accent); }
+  .filepicker-crumbs span:hover { text-decoration: underline; }
+  .filepicker-toggle { display: flex; flex-direction: column; align-items: center; gap: 1px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 10px; color: var(--text-dim); cursor: pointer; user-select: none; white-space: nowrap; flex-shrink: 0; }
+  .filepicker-list { list-style: none; overflow-y: auto; flex: 1; }
+  .filepicker-item { padding: 4px 10px; cursor: pointer; font-size: 13px; font-family: var(--mono); display: flex; align-items: center; gap: 6px; }
+  .filepicker-item:hover { background: rgba(255,255,255,0.05); }
+  .filepicker-item.selected { background: rgba(88,166,255,0.12); color: var(--accent); }
+  .filepicker-icon { width: 16px; text-align: center; font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+
+  /* Toast */
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--red); color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 13px; z-index: 200; max-width: 500px; text-align: center; }
 </style>
 </head>
 <body>
@@ -118,17 +136,20 @@
 
 <!-- Create Workspace Dialog -->
 <div class="dialog-overlay hidden" id="dialog-workspace">
-  <div class="dialog">
+  <div class="dialog wide">
     <h3>New Workspace</h3>
+    <label>Directory</label>
+    <div class="filepicker" id="filepicker">
+      <div class="filepicker-path" id="filepicker-path"></div>
+      <ul class="filepicker-list" id="filepicker-list"></ul>
+    </div>
     <label>Name</label>
     <input type="text" id="ws-name" placeholder="my-project">
-    <label>Directory</label>
-    <input type="text" id="ws-cwd" placeholder="/Users/chris/Git/my-project">
     <label>Permission Mode</label>
     <select id="ws-permission">
-      <option value="bypassPermissions">Bypass Permissions</option>
+      <option value="default" selected>Default</option>
       <option value="acceptEdits">Accept Edits</option>
-      <option value="default">Default</option>
+      <option value="bypassPermissions">Bypass Permissions</option>
       <option value="plan">Plan</option>
     </select>
     <div class="actions">
@@ -146,6 +167,14 @@
     <input type="text" id="sess-name" placeholder="bug-fix">
     <label>Model (optional)</label>
     <input type="text" id="sess-model" placeholder="claude-sonnet-4-6">
+    <label>Permission Mode (optional, inherits from workspace)</label>
+    <select id="sess-permission">
+      <option value="">(inherit from workspace)</option>
+      <option value="default">Default</option>
+      <option value="acceptEdits">Accept Edits</option>
+      <option value="bypassPermissions">Bypass Permissions</option>
+      <option value="plan">Plan</option>
+    </select>
     <div class="actions">
       <button class="btn" onclick="hideDialog('dialog-session')">Cancel</button>
       <button class="btn btn-primary" onclick="createSession()">Create</button>
@@ -155,6 +184,17 @@
 
 <script>
 const API = '/api/v1';
+
+// API key: check URL param first, then localStorage
+const urlKey = new URLSearchParams(window.location.search).get('api_key');
+let apiKey = urlKey || localStorage.getItem('ayseepee_api_key') || '';
+if (urlKey) {
+  localStorage.setItem('ayseepee_api_key', urlKey);
+  // Strip key from URL so it's not visible in browser history
+  const clean = new URL(window.location.href);
+  clean.searchParams.delete('api_key');
+  window.history.replaceState({}, '', clean.pathname + clean.search);
+}
 
 let state = {
   workspaces: [],
@@ -167,20 +207,50 @@ let state = {
 
 // --- API helpers ---
 async function api(method, path, body) {
-  const opts = { method, headers: {} };
+  const opts = { method, headers: { 'Authorization': `Bearer ${apiKey}` } };
   if (body) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
   const res = await fetch(API + path, opts);
+  if (res.status === 401) {
+    promptForApiKey('Invalid API key.');
+    throw new Error('Unauthorized');
+  }
   if (res.status === 204) return null;
-  return res.json();
+  const data = await res.json();
+  if (!res.ok) {
+    showError(data.error || `Request failed (${res.status})`);
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
+  return data;
+}
+
+function showError(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.add('hidden'), 5000);
+}
+
+function promptForApiKey(msg) {
+  const key = prompt(msg ? msg + ' Enter API key:' : 'Enter API key:');
+  if (key) {
+    apiKey = key.trim();
+    localStorage.setItem('ayseepee_api_key', apiKey);
+    loadWorkspaces();
+  }
 }
 
 // --- Workspaces ---
 async function loadWorkspaces() {
-  state.workspaces = await api('GET', '/workspaces');
-  renderWorkspaces();
+  try {
+    state.workspaces = await api('GET', '/workspaces');
+    renderWorkspaces();
+  } catch (e) {
+    if (e.message !== 'Unauthorized') throw e;
+  }
 }
 
 function renderWorkspaces() {
@@ -203,17 +273,107 @@ async function selectWorkspace(id) {
   showEmptyState();
 }
 
+// --- File picker ---
+let pickerCwd = '/';
+let pickerOpen = new Set();
+
 function showCreateWorkspace() {
   document.getElementById('ws-name').value = '';
-  document.getElementById('ws-cwd').value = '';
+  pickerCwd = '/';
+  pickerOpen.clear();
   showDialog('dialog-workspace');
+  loadPicker();
+}
+
+async function loadPicker() {
+  const showHidden = document.getElementById('filepicker-hidden')?.checked ?? false;
+  const data = await api('POST', '/files/list', { root: pickerCwd, open: [...pickerOpen], showHidden });
+  renderPicker(data);
+}
+
+function renderPicker(data) {
+  // Breadcrumb path + hidden toggle
+  const pathEl = document.getElementById('filepicker-path');
+  const parts = pickerCwd.split('/').filter(Boolean);
+  let crumbs = `<span onclick="pickerNavigate('/')">/</span>`;
+  let built = '';
+  for (const p of parts) {
+    built += '/' + p;
+    const target = built;
+    crumbs += `<span onclick="pickerNavigate('${esc(target)}')">${esc(p)}/</span>`;
+  }
+  const checked = document.getElementById('filepicker-hidden')?.checked ? 'checked' : '';
+  pathEl.innerHTML = `<div class="filepicker-crumbs">${crumbs}</div><label class="filepicker-toggle"><input type="checkbox" id="filepicker-hidden" ${checked} onchange="loadPicker()"><div>hidden</div></label>`;
+
+  // Build flat list with indentation
+  const listEl = document.getElementById('filepicker-list');
+  let html = '';
+
+  function renderDir(key, entries) {
+    const depth = key === '/' ? 0 : key.split('/').filter(Boolean).length;
+    const pad = 10 + depth * 16;
+    for (const e of entries) {
+      const relPath = key === '/' ? e.name : key.slice(1) + '/' + e.name;
+      if (e.type === 'directory') {
+        const isOpen = pickerOpen.has(relPath);
+        const absPath = pickerCwd.replace(/\/$/, '') + '/' + relPath;
+        html += `<li class="filepicker-item" style="padding-left:${pad}px">
+          <span class="filepicker-icon" onclick="event.stopPropagation();pickerToggle('${esc(relPath)}')">${isOpen ? '\u25BE' : '\u25B8'}</span>
+          <span onclick="pickerNavigate('${esc(absPath)}')">${esc(e.name)}/</span>
+        </li>`;
+        // Render children if open
+        if (isOpen && data.entries['/' + relPath]) {
+          renderDir('/' + relPath, data.entries['/' + relPath]);
+        }
+      } else {
+        html += `<li class="filepicker-item" style="padding-left:${pad}px;color:var(--text-dim);cursor:default">
+          <span class="filepicker-icon">&middot;</span>${esc(e.name)}
+        </li>`;
+      }
+    }
+  }
+
+  if (data.entries['/']) {
+    renderDir('/', data.entries['/']);
+  }
+  listEl.innerHTML = html;
+}
+
+function pickerNavigate(path) {
+  pickerCwd = path;
+  pickerOpen.clear();
+  // Auto-fill name from last directory segment
+  const segments = path.split('/').filter(Boolean);
+  if (segments.length > 0) {
+    document.getElementById('ws-name').value = segments[segments.length - 1];
+  }
+  loadPicker();
+}
+
+function pickerToggle(relPath) {
+  if (pickerOpen.has(relPath)) {
+    // Close this and any children
+    for (const p of [...pickerOpen]) {
+      if (p === relPath || p.startsWith(relPath + '/')) pickerOpen.delete(p);
+    }
+  } else {
+    pickerOpen.add(relPath);
+  }
+  loadPicker();
+}
+
+function pickerSelectedPath() {
+  return pickerCwd;
 }
 
 async function createWorkspace() {
   const name = document.getElementById('ws-name').value.trim();
-  const cwd = document.getElementById('ws-cwd').value.trim();
+  const cwd = pickerSelectedPath();
   const permissionMode = document.getElementById('ws-permission').value;
-  if (!name || !cwd) return;
+  if (!name || !cwd || cwd === '/') {
+    showError('Select a directory and enter a name');
+    return;
+  }
   await api('POST', '/workspaces', { name, cwd, permissionMode });
   hideDialog('dialog-workspace');
   await loadWorkspaces();
@@ -253,15 +413,18 @@ function showCreateSession() {
   if (!state.activeWorkspaceId) return;
   document.getElementById('sess-name').value = '';
   document.getElementById('sess-model').value = '';
+  document.getElementById('sess-permission').value = '';
   showDialog('dialog-session');
 }
 
 async function createSession() {
   const name = document.getElementById('sess-name').value.trim();
   const model = document.getElementById('sess-model').value.trim();
+  const permissionMode = document.getElementById('sess-permission').value;
   const body = {};
   if (name) body.name = name;
   if (model) body.model = model;
+  if (permissionMode) body.permissionMode = permissionMode;
   const s = await api('POST', `/workspaces/${state.activeWorkspaceId}/sessions`, body);
   hideDialog('dialog-session');
   await loadSessions();
@@ -469,13 +632,25 @@ function esc(str) {
   return d.innerHTML;
 }
 
+// Catch unhandled promise rejections (api errors already show toast, just suppress console noise)
+window.addEventListener('unhandledrejection', e => {
+  if (e.reason?.message === 'Unauthorized') { e.preventDefault(); return; }
+  if (e.reason?.message) showError(e.reason.message);
+  e.preventDefault();
+});
+
 // Close dialogs on overlay click
 document.querySelectorAll('.dialog-overlay').forEach(el => {
   el.addEventListener('click', e => { if (e.target === el) el.classList.add('hidden'); });
 });
 
 // Boot
-loadWorkspaces();
+if (!apiKey) {
+  promptForApiKey();
+} else {
+  loadWorkspaces();
+}
 </script>
+<div class="toast hidden" id="toast"></div>
 </body>
 </html>

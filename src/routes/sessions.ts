@@ -24,12 +24,12 @@ function createSession(ctx: RouteContext) {
   const workspace = db.prepare("SELECT * FROM workspaces WHERE id = ?").get(workspaceId);
   if (!workspace) return { status: 404, body: { error: "Workspace not found" } };
 
-  const body = (ctx.body as { name?: string; model?: string } | undefined) ?? {};
+  const body = (ctx.body as { name?: string; model?: string; permissionMode?: string } | undefined) ?? {};
   const id = randomUUID();
 
   db.prepare(
-    "INSERT INTO sessions (id, workspace_id, name, model) VALUES (?, ?, ?, ?)"
-  ).run(id, workspaceId, body.name ?? null, body.model ?? null);
+    "INSERT INTO sessions (id, workspace_id, name, model, permission_mode) VALUES (?, ?, ?, ?, ?)"
+  ).run(id, workspaceId, body.name ?? null, body.model ?? null, body.permissionMode ?? null);
 
   return { status: 201, body: rowToSession(db.prepare("SELECT * FROM sessions WHERE id = ?").get(id)) };
 }
@@ -159,7 +159,7 @@ function sendMessage(ctx: RouteContext) {
     agentSessionId: (session.agent_session_id as string) ?? null,
     allowedTools: workspace.allowed_tools ? JSON.parse(workspace.allowed_tools as string) : null,
     systemPrompt: (workspace.system_prompt as string) ?? null,
-    permissionMode: workspace.permission_mode as string,
+    permissionMode: (session.permission_mode as string) ?? (workspace.permission_mode as string),
     model: (body.model ?? session.model ?? null) as string | null,
     maxTurns: body.maxTurns ?? null,
     maxBudgetUsd: body.maxBudgetUsd ?? null,
@@ -242,6 +242,7 @@ function rowToSession(row: unknown): Record<string, unknown> {
     name: r.name,
     agentSessionId: r.agent_session_id,
     model: r.model,
+    permissionMode: r.permission_mode,
     status: r.status,
     createdAt: r.created_at,
     lastActiveAt: r.last_active_at,

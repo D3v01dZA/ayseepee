@@ -38,9 +38,14 @@ const MIME_TYPES: Record<string, string> = {
 export class Router {
   private routes: Route[] = [];
   private staticDir: string | null = null;
+  private apiKey: string = "";
 
   setStaticDir(dir: string) {
     this.staticDir = dir;
+  }
+
+  setApiKey(key: string) {
+    this.apiKey = key;
   }
 
   get(path: string, handler: Handler) {
@@ -54,6 +59,16 @@ export class Router {
   }
   delete(path: string, handler: Handler) {
     this.add("DELETE", path, handler);
+  }
+
+  private checkAuth(req: IncomingMessage): boolean {
+    const auth = req.headers.authorization;
+    if (auth?.startsWith("Bearer ")) {
+      return auth.slice(7) === this.apiKey;
+    }
+    // Also accept ?api_key= query param (for browser convenience)
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    return url.searchParams.get("api_key") === this.apiKey;
   }
 
   private add(method: string, path: string, handler: Handler) {
@@ -74,6 +89,12 @@ export class Router {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const pathname = url.pathname;
     const method = req.method ?? "GET";
+
+    if (pathname.startsWith("/api/") && !this.checkAuth(req)) {
+      sendJson(res, 401, { error: "Unauthorized" });
+      log(method, pathname, 401, start);
+      return;
+    }
 
     for (const route of this.routes) {
       if (route.method !== method) continue;

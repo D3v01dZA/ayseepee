@@ -45,8 +45,8 @@ export function runQuery(params: RunQueryParams): void {
 
   const options: Options = {
     cwd: params.cwd,
-    permissionMode: (params.permissionMode as Options["permissionMode"]) ?? "bypassPermissions",
-    allowDangerouslySkipPermissions: params.permissionMode === "bypassPermissions",
+    permissionMode: (params.permissionMode as Options["permissionMode"]) ?? "default",
+    ...(params.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
     abortController,
     persistSession: true,
   };

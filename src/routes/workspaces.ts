@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { Router, type RouteContext } from "../router.js";
 import { getDb } from "../db.js";
 
@@ -23,6 +24,13 @@ function createWorkspace(ctx: RouteContext) {
     return { status: 400, body: { error: "name and cwd are required" } };
   }
 
+  let cwd: string;
+  try {
+    cwd = realpathSync(body.cwd);
+  } catch {
+    return { status: 400, body: { error: `Directory not found: ${body.cwd}` } };
+  }
+
   const db = getDb();
   const id = randomUUID();
   db.prepare(
@@ -31,10 +39,10 @@ function createWorkspace(ctx: RouteContext) {
   ).run(
     id,
     body.name,
-    body.cwd,
+    cwd,
     body.allowedTools ? JSON.stringify(body.allowedTools) : null,
     body.systemPrompt ?? null,
-    body.permissionMode ?? "bypassPermissions"
+    body.permissionMode ?? "default"
   );
 
   return { status: 201, body: rowToWorkspace(db.prepare("SELECT * FROM workspaces WHERE id = ?").get(id)) };
@@ -69,8 +77,13 @@ function updateWorkspace(ctx: RouteContext) {
     values.push(body.name);
   }
   if ("cwd" in body) {
-    fields.push("cwd = ?");
-    values.push(body.cwd);
+    try {
+      const resolved = realpathSync(body.cwd as string);
+      fields.push("cwd = ?");
+      values.push(resolved);
+    } catch {
+      return { status: 400, body: { error: `Directory not found: ${body.cwd}` } };
+    }
   }
   if ("allowedTools" in body) {
     fields.push("allowed_tools = ?");
