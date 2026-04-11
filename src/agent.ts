@@ -1,7 +1,44 @@
-import { query, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query, type Options, type SDKMessage, type ModelInfo } from "@anthropic-ai/claude-agent-sdk";
 import { getDb } from "./db.js";
 
 const activeQueries = new Map<string, AbortController>();
+let cachedModels: ModelInfo[] | null = null;
+
+let modelsFetchPromise: Promise<ModelInfo[]> | null = null;
+
+export async function getModels(): Promise<ModelInfo[]> {
+  if (cachedModels) return cachedModels;
+  if (modelsFetchPromise) return modelsFetchPromise;
+
+  modelsFetchPromise = fetchModelsFromSDK();
+  try {
+    cachedModels = await modelsFetchPromise;
+    return cachedModels;
+  } finally {
+    modelsFetchPromise = null;
+  }
+}
+
+async function fetchModelsFromSDK(): Promise<ModelInfo[]> {
+  const abortController = new AbortController();
+  const conversation = query({
+    prompt: "hi",
+    options: {
+      cwd: process.cwd(),
+      permissionMode: "plan",
+      abortController,
+    },
+  });
+
+  try {
+    const models = await conversation.supportedModels();
+    return models;
+  } finally {
+    abortController.abort();
+    // Drain the generator so it doesn't leak
+    try { for await (const _ of conversation) { /* discard */ } } catch { /* expected abort error */ }
+  }
+}
 
 export function isQueryActive(messageId: string): boolean {
   return activeQueries.has(messageId);

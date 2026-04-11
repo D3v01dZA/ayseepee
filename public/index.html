@@ -63,6 +63,7 @@
   .event-result { padding: 8px 12px; background: rgba(63,185,80,0.06); border: 1px solid rgba(63,185,80,0.1); border-radius: 6px; font-size: 12px; }
   .event-result.error { background: rgba(248,81,73,0.06); border-color: rgba(248,81,73,0.1); }
   .event-result .cost { color: var(--text-dim); font-family: var(--mono); }
+  .event-model { font-size: 11px; color: var(--text-dim); font-family: var(--mono); background: rgba(255,255,255,0.04); padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
 
   .message-status { display: inline-block; font-size: 11px; font-family: var(--mono); padding: 1px 6px; border-radius: 4px; margin-left: 8px; }
 
@@ -112,7 +113,7 @@
     </div>
     <ul class="sidebar-list" id="workspace-list"></ul>
     <div class="sidebar-section">
-      <h2>Sessions <button class="btn btn-sm" id="btn-new-session" onclick="showCreateSession()" disabled>+</button></h2>
+      <h2>Sessions <button class="btn btn-sm" id="btn-new-session" onclick="showCreateSession()">+</button></h2>
     </div>
     <ul class="sidebar-list" id="session-list"></ul>
   </div>
@@ -166,7 +167,9 @@
     <label>Name (optional)</label>
     <input type="text" id="sess-name" placeholder="bug-fix">
     <label>Model (optional)</label>
-    <input type="text" id="sess-model" placeholder="claude-sonnet-4-6">
+    <select id="sess-model">
+      <option value="">(default)</option>
+    </select>
     <label>Permission Mode (optional, inherits from workspace)</label>
     <select id="sess-permission">
       <option value="">(inherit from workspace)</option>
@@ -267,7 +270,6 @@ function renderWorkspaces() {
 async function selectWorkspace(id) {
   state.activeWorkspaceId = id;
   state.activeSessionId = null;
-  document.getElementById('btn-new-session').disabled = false;
   renderWorkspaces();
   await loadSessions();
   showEmptyState();
@@ -410,7 +412,10 @@ function renderSessions() {
 }
 
 function showCreateSession() {
-  if (!state.activeWorkspaceId) return;
+  if (!state.activeWorkspaceId) {
+    showError('Select a workspace first');
+    return;
+  }
   document.getElementById('sess-name').value = '';
   document.getElementById('sess-model').value = '';
   document.getElementById('sess-permission').value = '';
@@ -521,13 +526,17 @@ function renderEvents(msg) {
     if (e.data?.type === 'assistant') {
       const text = extractAssistantText(e.data);
       if (!text) return '';
-      return `<div class="event"><div class="event-assistant">${esc(text)}</div></div>`;
+      const model = e.data?.message?.model;
+      const modelTag = model ? `<span class="event-model">${esc(shortModel(model))}</span>` : '';
+      return `<div class="event">${modelTag}<div class="event-assistant">${esc(text)}</div></div>`;
     }
     if (e.type?.startsWith('result')) {
       const isError = e.data?.is_error;
+      const model = e.data?.modelUsage ? Object.keys(e.data.modelUsage)[0] : null;
+      const modelTag = model ? `<span class="event-model">${esc(shortModel(model))}</span> ` : '';
       return `<div class="event"><div class="event-result ${isError ? 'error' : ''}">
         ${e.data?.result ? esc(e.data.result) : (e.data?.error || 'Done')}
-        <div class="cost">${e.data?.total_cost_usd ? '$' + e.data.total_cost_usd.toFixed(4) : ''} ${e.data?.duration_ms ? (e.data.duration_ms / 1000).toFixed(1) + 's' : ''}</div>
+        <div class="cost">${modelTag}${e.data?.total_cost_usd ? '$' + e.data.total_cost_usd.toFixed(4) : ''} ${e.data?.duration_ms ? (e.data.duration_ms / 1000).toFixed(1) + 's' : ''}</div>
       </div></div>`;
     }
     if (e.data?.type === 'system' && e.data?.subtype === 'init') return '';
@@ -625,6 +634,39 @@ function showEmptyState() {
 function showDialog(id) { document.getElementById(id).classList.remove('hidden'); }
 function hideDialog(id) { document.getElementById(id).classList.add('hidden'); }
 
+let modelMap = {};
+
+function shortModel(model) {
+  return modelMap[model] || model;
+}
+
+async function fetchModels() {
+  try {
+    const data = await api('GET', '/models');
+    const sel = document.getElementById('sess-model');
+    // Keep the default option, clear the rest
+    while (sel.options.length > 1) sel.remove(1);
+    if (data.models && data.models.length > 0) {
+      modelMap = {};
+      for (const m of data.models) {
+        // Extract short model name from description (e.g. "Sonnet 4.6 · Best for..." → "Sonnet 4.6")
+        const shortName = m.description?.split('·')[0]?.trim() || m.displayName;
+        modelMap[m.value] = shortName;
+        if (m.value === 'default') {
+          sel.options[0].textContent = `${shortName} (default)`;
+          continue;
+        }
+        const opt = document.createElement('option');
+        opt.value = m.value;
+        opt.textContent = shortName;
+        sel.appendChild(opt);
+      }
+    }
+  } catch {
+    // Models not yet available (no query has run), leave dropdown empty
+  }
+}
+
 function esc(str) {
   if (!str) return '';
   const d = document.createElement('div');
@@ -649,6 +691,7 @@ if (!apiKey) {
   promptForApiKey();
 } else {
   loadWorkspaces();
+  fetchModels();
 }
 </script>
 <div class="toast hidden" id="toast"></div>

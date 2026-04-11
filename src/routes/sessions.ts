@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { Router, type RouteContext } from "../router.js";
 import { getDb } from "../db.js";
-import { runQuery, interruptQuery } from "../agent.js";
+import { runQuery, interruptQuery, getModels } from "../agent.js";
 
 export function registerSessionRoutes(router: Router): void {
+  // Models
+  router.get("/api/v1/models", listModels);
+
   // Session CRUD
   router.post("/api/v1/workspaces/:workspaceId/sessions", createSession);
   router.get("/api/v1/workspaces/:workspaceId/sessions", listSessions);
@@ -15,6 +18,11 @@ export function registerSessionRoutes(router: Router): void {
   router.post("/api/v1/sessions/:id/messages", sendMessage);
   router.get("/api/v1/messages/:id", getMessage);
   router.post("/api/v1/messages/:id/interrupt", interruptMessage);
+}
+
+async function listModels() {
+  const models = await getModels();
+  return { status: 200, body: { models } };
 }
 
 function createSession(ctx: RouteContext) {
