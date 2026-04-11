@@ -64,6 +64,16 @@
   .event-result.error { background: rgba(248,81,73,0.06); border-color: rgba(248,81,73,0.1); }
   .event-result .cost { color: var(--text-dim); font-family: var(--mono); }
   .event-model { font-size: 11px; color: var(--text-dim); font-family: var(--mono); background: rgba(255,255,255,0.04); padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
+  .event-tool-use { padding: 6px 10px; background: rgba(210,153,34,0.06); border: 1px solid rgba(210,153,34,0.1); border-radius: 6px; font-family: var(--mono); font-size: 12px; margin: 4px 0; }
+  .event-tool-use .tool-name { color: var(--yellow); font-weight: 600; }
+  .event-tool-use .tool-input { color: var(--text-dim); margin-top: 4px; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow: auto; }
+  .event-tool-result { padding: 6px 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 6px; font-family: var(--mono); font-size: 11px; color: var(--text-dim); white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow: auto; margin: 4px 0; }
+  .event-permission { padding: 8px 12px; background: rgba(88,166,255,0.06); border: 1px solid rgba(88,166,255,0.15); border-radius: 6px; font-size: 12px; margin: 4px 0; }
+  .event-permission .perm-title { font-weight: 600; margin-bottom: 4px; }
+  .event-permission .perm-desc { color: var(--text-dim); font-size: 11px; margin-bottom: 8px; }
+  .event-permission .perm-actions { display: flex; gap: 8px; }
+  .event-permission .perm-actions button { padding: 4px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; border: 1px solid var(--border); }
+  .event-permission .perm-resolved { font-style: italic; color: var(--text-dim); }
 
   .message-status { display: inline-block; font-size: 11px; font-family: var(--mono); padding: 1px 6px; border-radius: 4px; margin-left: 8px; }
 
@@ -166,9 +176,11 @@
     <h3>New Session</h3>
     <label>Name (optional)</label>
     <input type="text" id="sess-name" placeholder="bug-fix">
-    <label>Model (optional)</label>
+    <label>Model</label>
     <select id="sess-model">
-      <option value="">(default)</option>
+      <option value="sonnet" selected>Sonnet</option>
+      <option value="opus">Opus</option>
+      <option value="haiku">Haiku</option>
     </select>
     <label>Permission Mode (optional, inherits from workspace)</label>
     <select id="sess-permission">
@@ -398,6 +410,11 @@ async function loadSessions() {
   if (!state.activeWorkspaceId) { state.sessions = []; renderSessions(); return; }
   state.sessions = await api('GET', `/workspaces/${state.activeWorkspaceId}/sessions`);
   renderSessions();
+  // Keep title in sync
+  if (state.activeSessionId) {
+    const s = state.sessions.find(s => s.id === state.activeSessionId);
+    if (s) document.getElementById('main-title').textContent = s.name || s.id.slice(0, 8);
+  }
 }
 
 function renderSessions() {
@@ -417,18 +434,17 @@ function showCreateSession() {
     return;
   }
   document.getElementById('sess-name').value = '';
-  document.getElementById('sess-model').value = '';
+  document.getElementById('sess-model').value = 'sonnet';
   document.getElementById('sess-permission').value = '';
   showDialog('dialog-session');
 }
 
 async function createSession() {
   const name = document.getElementById('sess-name').value.trim();
-  const model = document.getElementById('sess-model').value.trim();
+  const model = document.getElementById('sess-model').value;
   const permissionMode = document.getElementById('sess-permission').value;
-  const body = {};
+  const body = { model };
   if (name) body.name = name;
-  if (model) body.model = model;
   if (permissionMode) body.permissionMode = permissionMode;
   const s = await api('POST', `/workspaces/${state.activeWorkspaceId}/sessions`, body);
   hideDialog('dialog-session');
@@ -449,9 +465,30 @@ async function loadSessionView() {
   const session = state.sessions.find(s => s.id === state.activeSessionId);
   const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
 
-  document.getElementById('main-title').textContent = session?.name || session?.id.slice(0, 8) || 'Session';
+  const titleEl = document.getElementById('main-title');
+  titleEl.textContent = session?.name || session?.id.slice(0, 8) || 'Session';
+  titleEl.style.cursor = 'pointer';
+  titleEl.title = 'Click to rename';
+  titleEl.onclick = () => {
+    const name = prompt('Rename session:', titleEl.textContent);
+    if (name !== null && name.trim()) updateSessionSetting('name', name.trim());
+  };
   document.getElementById('main-meta').textContent = workspace?.cwd || '';
+  const permMode = session?.permissionMode || workspace?.permissionMode || 'default';
+  const modelVal = session?.model || '';
   document.getElementById('main-actions').innerHTML = `
+    <select id="session-model" class="btn btn-sm" onchange="updateSessionSetting('model', this.value)">
+      <option value="sonnet" ${!modelVal || modelVal === 'sonnet' ? 'selected' : ''}>Sonnet</option>
+      <option value="opus" ${modelVal === 'opus' ? 'selected' : ''}>Opus</option>
+      <option value="haiku" ${modelVal === 'haiku' ? 'selected' : ''}>Haiku</option>
+    </select>
+    <select id="session-perm" class="btn btn-sm" onchange="updateSessionSetting('permissionMode', this.value)">
+      <option value="" ${!session?.permissionMode ? 'selected' : ''}>(inherit: ${permModeLabel(workspace?.permissionMode)})</option>
+      <option value="default" ${session?.permissionMode === 'default' ? 'selected' : ''}>Default</option>
+      <option value="acceptEdits" ${session?.permissionMode === 'acceptEdits' ? 'selected' : ''}>Accept Edits</option>
+      <option value="bypassPermissions" ${session?.permissionMode === 'bypassPermissions' ? 'selected' : ''}>Bypass Permissions</option>
+      <option value="plan" ${session?.permissionMode === 'plan' ? 'selected' : ''}>Plan</option>
+    </select>
     <button class="btn btn-sm btn-danger" onclick="deleteSession('${state.activeSessionId}')">Delete</button>
   `;
 
@@ -515,33 +552,69 @@ function renderMessages() {
 }
 
 function renderEvents(msg) {
+  const isActive = msg.status === 'pending' || msg.status === 'streaming';
+
   if (!msg.events || msg.events.length === 0) {
-    if (msg.status === 'pending' || msg.status === 'streaming') {
-      return '<div class="event"><span class="event-type">waiting...</span></div>';
-    }
-    return '';
+    return isActive ? '<div class="event"><span class="event-type">waiting...</span></div>' : '';
   }
 
-  return msg.events.map(e => {
+  const rendered = msg.events.map(e => {
     if (e.data?.type === 'assistant') {
-      const text = extractAssistantText(e.data);
-      if (!text) return '';
-      const model = e.data?.message?.model;
-      const modelTag = model ? `<span class="event-model">${esc(shortModel(model))}</span>` : '';
-      return `<div class="event">${modelTag}<div class="event-assistant">${esc(text)}</div></div>`;
+      const parts = [];
+      const content = e.data?.message?.content || [];
+      for (const block of content) {
+        if (block.type === 'text' && block.text) {
+          parts.push(`<div class="event-assistant">${esc(block.text)}</div>`);
+        } else if (block.type === 'tool_use') {
+          parts.push(`<div class="event-tool-use">
+            <span class="tool-name">${esc(block.name)}</span>
+            <div class="tool-input">${esc(formatToolInput(block.input))}</div>
+          </div>`);
+        }
+      }
+      return parts.length ? `<div class="event">${parts.join('')}</div>` : '';
+    }
+    if (e.type === 'permission_request') {
+      const resolved = e.data.resolved;
+      const inner = (resolved && resolved !== 'pending')
+        ? `<div class="perm-resolved">${resolved === 'allowed' ? 'Allowed' : 'Denied'}</div>`
+        : `<div class="perm-actions">
+            <button class="btn btn-sm" style="background:var(--green);color:#000;border:none;" onclick="resolvePermission('${e.data.id}', true)">Allow</button>
+            <button class="btn btn-sm" style="background:var(--red);color:#fff;border:none;" onclick="resolvePermission('${e.data.id}', false)">Deny</button>
+          </div>`;
+      return `<div class="event"><div class="event-permission">
+        <div class="perm-title">${esc(e.data.title || e.data.tool_name)}</div>
+        ${e.data.description ? `<div class="perm-desc">${esc(e.data.description)}</div>` : ''}
+        ${inner}
+      </div></div>`;
     }
     if (e.type?.startsWith('result')) {
       const isError = e.data?.is_error;
       const model = e.data?.modelUsage ? Object.keys(e.data.modelUsage)[0] : null;
       const modelTag = model ? `<span class="event-model">${esc(shortModel(model))}</span> ` : '';
+      const errorText = isError && e.data?.error ? esc(e.data.error) : '';
       return `<div class="event"><div class="event-result ${isError ? 'error' : ''}">
-        ${e.data?.result ? esc(e.data.result) : (e.data?.error || 'Done')}
+        ${errorText}
         <div class="cost">${modelTag}${e.data?.total_cost_usd ? '$' + e.data.total_cost_usd.toFixed(4) : ''} ${e.data?.duration_ms ? (e.data.duration_ms / 1000).toFixed(1) + 's' : ''}</div>
       </div></div>`;
+    }
+    if (e.data?.type === 'user' && e.data?.tool_use_result !== undefined) {
+      const result = formatToolResult(e.data.tool_use_result);
+      if (!result) return '';
+      return `<div class="event"><div class="event-tool-result">${esc(result)}</div></div>`;
+    }
+    if (e.data?.type === 'tool_use_summary') {
+      return `<div class="event"><div class="event-tool-result">${esc(e.data.summary)}</div></div>`;
     }
     if (e.data?.type === 'system' && e.data?.subtype === 'init') return '';
     return '';
   }).join('');
+
+  // If still active but all events rendered as empty (e.g. only system events), show waiting
+  if (isActive && !rendered.trim()) {
+    return rendered + '<div class="event"><span class="event-type">waiting...</span></div>';
+  }
+  return rendered;
 }
 
 function extractAssistantText(data) {
@@ -613,6 +686,51 @@ async function pollMessage(messageId) {
   }
 }
 
+async function resolvePermission(id, allow) {
+  await api('POST', `/permissions/${id}/resolve`, { allow });
+  // Update the event data locally so re-render reflects it immediately
+  const msgs = state.messages[state.activeSessionId] || [];
+  for (const m of msgs) {
+    const ev = (m.events || []).find(e => e.data?.id === id);
+    if (ev) ev.data.resolved = allow ? 'allowed' : 'denied';
+  }
+  renderMessages();
+}
+
+function formatToolResult(result) {
+  if (!result) return '';
+  if (typeof result === 'string') return result;
+  // Bash tool results: extract stdout/stderr
+  if (typeof result === 'object' && ('stdout' in result || 'stderr' in result)) {
+    const parts = [];
+    if (result.stdout) parts.push(result.stdout);
+    if (result.stderr) parts.push(result.stderr);
+    return parts.join('\n').trim();
+  }
+  // Content arrays (Read tool, etc.)
+  if (Array.isArray(result)) {
+    return result.map(r => r.text || r.content || JSON.stringify(r)).join('\n');
+  }
+  return JSON.stringify(result, null, 2);
+}
+
+function formatToolInput(input) {
+  if (!input || typeof input !== 'object') return String(input || '');
+  const entries = Object.entries(input);
+  return entries.map(([k, v]) => {
+    const val = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+    return `${k}: ${val}`;
+  }).join('\n');
+}
+
+async function updateSessionSetting(field, value) {
+  if (!state.activeSessionId) return;
+  const updated = await api('PATCH', `/sessions/${state.activeSessionId}`, { [field]: value });
+  const idx = state.sessions.findIndex(s => s.id === state.activeSessionId);
+  if (idx >= 0) state.sessions[idx] = updated;
+  await loadSessions();
+}
+
 async function deleteSession(id) {
   await api('DELETE', `/sessions/${id}`);
   delete state.messages[id];
@@ -634,37 +752,14 @@ function showEmptyState() {
 function showDialog(id) { document.getElementById(id).classList.remove('hidden'); }
 function hideDialog(id) { document.getElementById(id).classList.add('hidden'); }
 
-let modelMap = {};
-
-function shortModel(model) {
-  return modelMap[model] || model;
+function permModeLabel(mode) {
+  const map = { default: 'Default', acceptEdits: 'Accept Edits', bypassPermissions: 'Bypass Permissions', plan: 'Plan' };
+  return map[mode] || mode || 'Default';
 }
 
-async function fetchModels() {
-  try {
-    const data = await api('GET', '/models');
-    const sel = document.getElementById('sess-model');
-    // Keep the default option, clear the rest
-    while (sel.options.length > 1) sel.remove(1);
-    if (data.models && data.models.length > 0) {
-      modelMap = {};
-      for (const m of data.models) {
-        // Extract short model name from description (e.g. "Sonnet 4.6 · Best for..." → "Sonnet 4.6")
-        const shortName = m.description?.split('·')[0]?.trim() || m.displayName;
-        modelMap[m.value] = shortName;
-        if (m.value === 'default') {
-          sel.options[0].textContent = `${shortName} (default)`;
-          continue;
-        }
-        const opt = document.createElement('option');
-        opt.value = m.value;
-        opt.textContent = shortName;
-        sel.appendChild(opt);
-      }
-    }
-  } catch {
-    // Models not yet available (no query has run), leave dropdown empty
-  }
+function shortModel(model) {
+  const map = { opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' };
+  return map[model] || model;
 }
 
 function esc(str) {
@@ -691,7 +786,6 @@ if (!apiKey) {
   promptForApiKey();
 } else {
   loadWorkspaces();
-  fetchModels();
 }
 </script>
 <div class="toast hidden" id="toast"></div>

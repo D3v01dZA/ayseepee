@@ -95,7 +95,7 @@ function updateWorkspace(ctx: RouteContext) {
   }
   if ("permissionMode" in body) {
     fields.push("permission_mode = ?");
-    values.push(body.permissionMode);
+    values.push(body.permissionMode || "default");
   }
 
   if (fields.length === 0) {

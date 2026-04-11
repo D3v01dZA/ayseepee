@@ -1,44 +1,8 @@
-import { query, type Options, type SDKMessage, type ModelInfo } from "@anthropic-ai/claude-agent-sdk";
+import { randomUUID } from "node:crypto";
+import { query, type Options, type SDKMessage, type PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import { getDb } from "./db.js";
 
 const activeQueries = new Map<string, AbortController>();
-let cachedModels: ModelInfo[] | null = null;
-
-let modelsFetchPromise: Promise<ModelInfo[]> | null = null;
-
-export async function getModels(): Promise<ModelInfo[]> {
-  if (cachedModels) return cachedModels;
-  if (modelsFetchPromise) return modelsFetchPromise;
-
-  modelsFetchPromise = fetchModelsFromSDK();
-  try {
-    cachedModels = await modelsFetchPromise;
-    return cachedModels;
-  } finally {
-    modelsFetchPromise = null;
-  }
-}
-
-async function fetchModelsFromSDK(): Promise<ModelInfo[]> {
-  const abortController = new AbortController();
-  const conversation = query({
-    prompt: "hi",
-    options: {
-      cwd: process.cwd(),
-      permissionMode: "plan",
-      abortController,
-    },
-  });
-
-  try {
-    const models = await conversation.supportedModels();
-    return models;
-  } finally {
-    abortController.abort();
-    // Drain the generator so it doesn't leak
-    try { for await (const _ of conversation) { /* discard */ } } catch { /* expected abort error */ }
-  }
-}
 
 export function isQueryActive(messageId: string): boolean {
   return activeQueries.has(messageId);
@@ -94,9 +58,7 @@ export function runQuery(params: RunQueryParams): void {
   if (params.systemPrompt) {
     options.systemPrompt = params.systemPrompt;
   }
-  if (params.model) {
-    options.model = params.model;
-  }
+  options.model = params.model || "sonnet";
   if (params.maxTurns) {
     options.maxTurns = params.maxTurns;
   }
@@ -110,6 +72,51 @@ export function runQuery(params: RunQueryParams): void {
   const insertEvent = db.prepare(
     "INSERT INTO message_events (message_id, event_type, data) VALUES (?, ?, ?)"
   );
+
+  // Permission handler — writes request to DB, polls until resolved by client
+  if (params.permissionMode !== "bypassPermissions") {
+    options.canUseTool = async (toolName, input, opts) => {
+      const id = randomUUID();
+      log("query:permission", messageId, { tool: toolName, title: opts.title });
+
+      db.prepare(
+        "INSERT INTO permission_requests (id, message_id, tool_name, tool_input, title, description) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(id, messageId, toolName, JSON.stringify(input), opts.title ?? null, opts.description ?? null);
+
+      // Also store as an event so the frontend sees it
+      insertEvent.run(messageId, "permission_request", JSON.stringify({
+        type: "permission_request",
+        id,
+        tool_name: toolName,
+        input,
+        title: opts.title,
+        description: opts.description,
+        display_name: opts.displayName,
+      }));
+
+      // Poll DB until resolved or aborted
+      return new Promise<PermissionResult>((resolve) => {
+        const poll = setInterval(() => {
+          if (opts.signal.aborted) {
+            clearInterval(poll);
+            resolve({ behavior: "deny", message: "Aborted" } as PermissionResult);
+            return;
+          }
+          const row = db.prepare("SELECT status, response FROM permission_requests WHERE id = ?").get(id) as
+            | { status: string; response: string | null }
+            | undefined;
+          if (row && row.status !== "pending") {
+            clearInterval(poll);
+            if (row.status === "allowed") {
+              resolve({ behavior: "allow", updatedInput: input } as PermissionResult);
+            } else {
+              resolve({ behavior: "deny", message: row.response || "Denied by user" } as PermissionResult);
+            }
+          }
+        }, 500);
+      });
+    };
+  }
 
   const conversation = query({ prompt: params.prompt, options });
 

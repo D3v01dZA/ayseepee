@@ -1,16 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { Router, type RouteContext } from "../router.js";
 import { getDb } from "../db.js";
-import { runQuery, interruptQuery, getModels } from "../agent.js";
+import { runQuery, interruptQuery } from "../agent.js";
 
 export function registerSessionRoutes(router: Router): void {
-  // Models
-  router.get("/api/v1/models", listModels);
 
   // Session CRUD
   router.post("/api/v1/workspaces/:workspaceId/sessions", createSession);
   router.get("/api/v1/workspaces/:workspaceId/sessions", listSessions);
   router.get("/api/v1/sessions/:id", getSession);
+  router.patch("/api/v1/sessions/:id", updateSession);
   router.delete("/api/v1/sessions/:id", deleteSession);
 
   // Messaging
@@ -18,11 +17,9 @@ export function registerSessionRoutes(router: Router): void {
   router.post("/api/v1/sessions/:id/messages", sendMessage);
   router.get("/api/v1/messages/:id", getMessage);
   router.post("/api/v1/messages/:id/interrupt", interruptMessage);
-}
 
-async function listModels() {
-  const models = await getModels();
-  return { status: 200, body: { models } };
+  // Permissions
+  router.post("/api/v1/permissions/:id/resolve", resolvePermission);
 }
 
 function createSession(ctx: RouteContext) {
@@ -60,6 +57,41 @@ function getSession(ctx: RouteContext) {
   const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(ctx.params.id);
   if (!row) return { status: 404, body: { error: "Session not found" } };
   return { status: 200, body: rowToSession(row) };
+}
+
+function updateSession(ctx: RouteContext) {
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(ctx.params.id);
+  if (!row) return { status: 404, body: { error: "Session not found" } };
+
+  const body = ctx.body as Record<string, unknown> | undefined;
+  if (!body) return { status: 400, body: { error: "Request body required" } };
+
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  if ("name" in body) {
+    fields.push("name = ?");
+    values.push(body.name ?? null);
+  }
+  if ("model" in body) {
+    fields.push("model = ?");
+    values.push(body.model || null);
+  }
+  if ("permissionMode" in body) {
+    fields.push("permission_mode = ?");
+    values.push(body.permissionMode || null);
+  }
+
+  if (fields.length === 0) {
+    return { status: 400, body: { error: "No fields to update" } };
+  }
+
+  values.push(ctx.params.id);
+  db.prepare(`UPDATE sessions SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+
+  const updated = db.prepare("SELECT * FROM sessions WHERE id = ?").get(ctx.params.id);
+  return { status: 200, body: rowToSession(updated) };
 }
 
 function deleteSession(ctx: RouteContext) {
@@ -112,12 +144,7 @@ function listMessages(ctx: RouteContext) {
       durationMs: m.duration_ms,
       createdAt: m.created_at,
       completedAt: m.completed_at,
-      events: events.map((e) => ({
-        id: e.id,
-        type: e.event_type,
-        data: JSON.parse(e.data),
-        createdAt: e.created_at,
-      })),
+      events: events.map((e) => parseEvent(db, e)),
     };
   });
 
@@ -152,6 +179,12 @@ function sendMessage(ctx: RouteContext) {
     | undefined;
   if (!workspace) return { status: 500, body: { error: "Workspace not found for session" } };
 
+  // Auto-name session from first prompt if unnamed
+  if (!session.name) {
+    const autoName = body.prompt.length > 60 ? body.prompt.slice(0, 57) + "..." : body.prompt;
+    db.prepare("UPDATE sessions SET name = ? WHERE id = ?").run(autoName, sessionId);
+  }
+
   const messageId = randomUUID();
   db.prepare("INSERT INTO messages (id, session_id, prompt) VALUES (?, ?, ?)").run(
     messageId,
@@ -167,7 +200,7 @@ function sendMessage(ctx: RouteContext) {
     agentSessionId: (session.agent_session_id as string) ?? null,
     allowedTools: workspace.allowed_tools ? JSON.parse(workspace.allowed_tools as string) : null,
     systemPrompt: (workspace.system_prompt as string) ?? null,
-    permissionMode: (session.permission_mode as string) ?? (workspace.permission_mode as string),
+    permissionMode: (session.permission_mode as string) || (workspace.permission_mode as string) || "default",
     model: (body.model ?? session.model ?? null) as string | null,
     maxTurns: body.maxTurns ?? null,
     maxBudgetUsd: body.maxBudgetUsd ?? null,
@@ -206,12 +239,7 @@ function getMessage(ctx: RouteContext) {
       durationMs: message.duration_ms,
       createdAt: message.created_at,
       completedAt: message.completed_at,
-      events: events.map((e) => ({
-        id: e.id,
-        type: e.event_type,
-        data: JSON.parse(e.data),
-        createdAt: e.created_at,
-      })),
+      events: events.map((e) => parseEvent(db, e)),
     },
   };
 }
@@ -240,6 +268,39 @@ function interruptMessage(ctx: RouteContext) {
   }
 
   return { status: 200, body: { interrupted } };
+}
+
+function resolvePermission(ctx: RouteContext) {
+  const db = getDb();
+  const { id } = ctx.params;
+
+  const row = db.prepare("SELECT * FROM permission_requests WHERE id = ?").get(id) as
+    | Record<string, unknown>
+    | undefined;
+  if (!row) return { status: 404, body: { error: "Permission request not found" } };
+  if (row.status !== "pending") return { status: 409, body: { error: "Already resolved" } };
+
+  const body = ctx.body as { allow: boolean; message?: string } | undefined;
+  if (!body || typeof body.allow !== "boolean") {
+    return { status: 400, body: { error: "allow (boolean) is required" } };
+  }
+
+  db.prepare(
+    "UPDATE permission_requests SET status = ?, response = ?, resolved_at = datetime('now') WHERE id = ?"
+  ).run(body.allow ? "allowed" : "denied", body.message ?? null, id);
+
+  return { status: 200, body: { id, status: body.allow ? "allowed" : "denied" } };
+}
+
+function parseEvent(db: ReturnType<typeof getDb>, e: { id: number; event_type: string; data: string; created_at: string }) {
+  const data = JSON.parse(e.data);
+  if (e.event_type === "permission_request" && data.id) {
+    const perm = db.prepare("SELECT status FROM permission_requests WHERE id = ?").get(data.id) as
+      | { status: string }
+      | undefined;
+    if (perm) data.resolved = perm.status;
+  }
+  return { id: e.id, type: e.event_type, data, createdAt: e.created_at };
 }
 
 function rowToSession(row: unknown): Record<string, unknown> {
