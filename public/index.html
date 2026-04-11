@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ayseepee</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d; --border-light: #484f58;
+    --text: #e6edf3; --text-dim: #8b949e; --accent: #58a6ff; --accent-dim: #1f6feb;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922; --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  #app { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
+
+  /* Sidebar */
+  .sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
+  .sidebar-header h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.5px; }
+  .sidebar-header h1 span { color: var(--text-dim); font-weight: 400; }
+  .sidebar-section { padding: 8px; border-bottom: 1px solid var(--border); }
+  .sidebar-section h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); padding: 4px 8px; display: flex; align-items: center; justify-content: space-between; }
+  .sidebar-list { list-style: none; overflow-y: auto; flex: 1; }
+  .sidebar-item { padding: 6px 12px; cursor: pointer; border-radius: 6px; margin: 2px 4px; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+  .sidebar-item:hover { background: rgba(255,255,255,0.05); }
+  .sidebar-item.active { background: rgba(88,166,255,0.1); color: var(--accent); }
+  .sidebar-item .status { font-size: 10px; padding: 1px 6px; border-radius: 10px; }
+  .status-idle { background: rgba(63,185,80,0.15); color: var(--green); }
+  .status-active { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .status-error { background: rgba(248,81,73,0.15); color: var(--red); }
+
+  /* Buttons */
+  .btn { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .btn:hover { border-color: var(--border-light); }
+  .btn-sm { padding: 2px 8px; font-size: 11px; }
+  .btn-primary { background: var(--accent-dim); border-color: var(--accent-dim); }
+  .btn-primary:hover { background: var(--accent); }
+  .btn-danger { color: var(--red); }
+  .btn-danger:hover { background: rgba(248,81,73,0.1); }
+
+  /* Main area */
+  .main { display: flex; flex-direction: column; overflow: hidden; }
+  .main-header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; min-height: 49px; }
+  .main-header h2 { font-size: 14px; font-weight: 600; }
+  .main-header .meta { font-size: 12px; color: var(--text-dim); font-family: var(--mono); }
+
+  .main-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 14px; }
+
+  /* Messages feed */
+  .messages { flex: 1; overflow-y: auto; padding: 16px 20px; }
+  .message-group { margin-bottom: 20px; }
+  .message-prompt { font-size: 13px; color: var(--accent); margin-bottom: 8px; padding: 8px 12px; background: rgba(88,166,255,0.06); border-radius: 8px; border: 1px solid rgba(88,166,255,0.1); }
+  .message-prompt .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 4px; }
+  .message-events { margin-left: 12px; border-left: 2px solid var(--border); padding-left: 12px; }
+  .event { margin-bottom: 6px; font-size: 13px; }
+  .event-type { font-family: var(--mono); font-size: 11px; color: var(--text-dim); background: rgba(255,255,255,0.04); padding: 1px 6px; border-radius: 4px; display: inline-block; margin-bottom: 2px; }
+  .event-assistant { white-space: pre-wrap; font-family: var(--mono); font-size: 12px; line-height: 1.6; }
+  .event-tool { font-family: var(--mono); font-size: 12px; color: var(--yellow); }
+  .event-result { padding: 8px 12px; background: rgba(63,185,80,0.06); border: 1px solid rgba(63,185,80,0.1); border-radius: 6px; font-size: 12px; }
+  .event-result.error { background: rgba(248,81,73,0.06); border-color: rgba(248,81,73,0.1); }
+  .event-result .cost { color: var(--text-dim); font-family: var(--mono); }
+
+  .message-status { display: inline-block; font-size: 11px; font-family: var(--mono); padding: 1px 6px; border-radius: 4px; margin-left: 8px; }
+
+  /* Input bar */
+  .input-bar { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+  .input-bar input { flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 13px; outline: none; }
+  .input-bar input:focus { border-color: var(--accent); }
+  .input-bar input::placeholder { color: var(--text-dim); }
+
+  /* Dialogs */
+  .dialog-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 400px; max-width: 90vw; }
+  .dialog h3 { font-size: 15px; margin-bottom: 16px; }
+  .dialog label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 4px; margin-top: 12px; }
+  .dialog input, .dialog select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+  .dialog .actions { margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h1>ayseepee <span>v1</span></h1>
+    </div>
+    <div class="sidebar-section">
+      <h2>Workspaces <button class="btn btn-sm" onclick="showCreateWorkspace()">+</button></h2>
+    </div>
+    <ul class="sidebar-list" id="workspace-list"></ul>
+    <div class="sidebar-section">
+      <h2>Sessions <button class="btn btn-sm" id="btn-new-session" onclick="showCreateSession()" disabled>+</button></h2>
+    </div>
+    <ul class="sidebar-list" id="session-list"></ul>
+  </div>
+
+  <div class="main">
+    <div class="main-header">
+      <div>
+        <h2 id="main-title">Select a session</h2>
+        <div class="meta" id="main-meta"></div>
+      </div>
+      <div id="main-actions"></div>
+    </div>
+    <div class="main-empty" id="empty-state">Create a workspace and session to get started</div>
+    <div class="messages hidden" id="messages-feed"></div>
+    <div class="input-bar hidden" id="input-bar">
+      <input type="text" id="prompt-input" placeholder="Send a message..." onkeydown="if(event.key==='Enter')sendMessage()">
+      <button class="btn btn-primary" onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- Create Workspace Dialog -->
+<div class="dialog-overlay hidden" id="dialog-workspace">
+  <div class="dialog">
+    <h3>New Workspace</h3>
+    <label>Name</label>
+    <input type="text" id="ws-name" placeholder="my-project">
+    <label>Directory</label>
+    <input type="text" id="ws-cwd" placeholder="/Users/chris/Git/my-project">
+    <label>Permission Mode</label>
+    <select id="ws-permission">
+      <option value="bypassPermissions">Bypass Permissions</option>
+      <option value="acceptEdits">Accept Edits</option>
+      <option value="default">Default</option>
+      <option value="plan">Plan</option>
+    </select>
+    <div class="actions">
+      <button class="btn" onclick="hideDialog('dialog-workspace')">Cancel</button>
+      <button class="btn btn-primary" onclick="createWorkspace()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Create Session Dialog -->
+<div class="dialog-overlay hidden" id="dialog-session">
+  <div class="dialog">
+    <h3>New Session</h3>
+    <label>Name (optional)</label>
+    <input type="text" id="sess-name" placeholder="bug-fix">
+    <label>Model (optional)</label>
+    <input type="text" id="sess-model" placeholder="claude-sonnet-4-6">
+    <div class="actions">
+      <button class="btn" onclick="hideDialog('dialog-session')">Cancel</button>
+      <button class="btn btn-primary" onclick="createSession()">Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api/v1';
+
+let state = {
+  workspaces: [],
+  sessions: [],
+  activeWorkspaceId: null,
+  activeSessionId: null,
+  messages: [],     // message objects for current session
+  pollTimers: {},   // messageId -> intervalId
+};
+
+// --- API helpers ---
+async function api(method, path, body) {
+  const opts = { method, headers: {} };
+  if (body) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(API + path, opts);
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+// --- Workspaces ---
+async function loadWorkspaces() {
+  state.workspaces = await api('GET', '/workspaces');
+  renderWorkspaces();
+}
+
+function renderWorkspaces() {
+  const el = document.getElementById('workspace-list');
+  el.innerHTML = state.workspaces.map(w => `
+    <li class="sidebar-item ${w.id === state.activeWorkspaceId ? 'active' : ''}"
+        onclick="selectWorkspace('${w.id}')">
+      <span>${esc(w.name)}</span>
+      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteWorkspace('${w.id}')">&times;</button>
+    </li>
+  `).join('');
+}
+
+async function selectWorkspace(id) {
+  state.activeWorkspaceId = id;
+  state.activeSessionId = null;
+  document.getElementById('btn-new-session').disabled = false;
+  renderWorkspaces();
+  await loadSessions();
+  showEmptyState();
+}
+
+function showCreateWorkspace() {
+  document.getElementById('ws-name').value = '';
+  document.getElementById('ws-cwd').value = '';
+  showDialog('dialog-workspace');
+}
+
+async function createWorkspace() {
+  const name = document.getElementById('ws-name').value.trim();
+  const cwd = document.getElementById('ws-cwd').value.trim();
+  const permissionMode = document.getElementById('ws-permission').value;
+  if (!name || !cwd) return;
+  await api('POST', '/workspaces', { name, cwd, permissionMode });
+  hideDialog('dialog-workspace');
+  await loadWorkspaces();
+}
+
+async function deleteWorkspace(id) {
+  const res = await api('DELETE', `/workspaces/${id}`);
+  if (res && res.error) { alert(res.error); return; }
+  if (state.activeWorkspaceId === id) {
+    state.activeWorkspaceId = null;
+    state.activeSessionId = null;
+    document.getElementById('session-list').innerHTML = '';
+    showEmptyState();
+  }
+  await loadWorkspaces();
+}
+
+// --- Sessions ---
+async function loadSessions() {
+  if (!state.activeWorkspaceId) { state.sessions = []; renderSessions(); return; }
+  state.sessions = await api('GET', `/workspaces/${state.activeWorkspaceId}/sessions`);
+  renderSessions();
+}
+
+function renderSessions() {
+  const el = document.getElementById('session-list');
+  el.innerHTML = state.sessions.map(s => `
+    <li class="sidebar-item ${s.id === state.activeSessionId ? 'active' : ''}"
+        onclick="selectSession('${s.id}')">
+      <span>${esc(s.name || s.id.slice(0, 8))}</span>
+      <span class="status status-${s.status}">${s.status}</span>
+    </li>
+  `).join('');
+}
+
+function showCreateSession() {
+  if (!state.activeWorkspaceId) return;
+  document.getElementById('sess-name').value = '';
+  document.getElementById('sess-model').value = '';
+  showDialog('dialog-session');
+}
+
+async function createSession() {
+  const name = document.getElementById('sess-name').value.trim();
+  const model = document.getElementById('sess-model').value.trim();
+  const body = {};
+  if (name) body.name = name;
+  if (model) body.model = model;
+  const s = await api('POST', `/workspaces/${state.activeWorkspaceId}/sessions`, body);
+  hideDialog('dialog-session');
+  await loadSessions();
+  selectSession(s.id);
+}
+
+async function selectSession(id) {
+  state.activeSessionId = id;
+  renderSessions();
+  await loadSessionView();
+}
+
+// --- Session view ---
+async function loadSessionView() {
+  if (!state.activeSessionId) { showEmptyState(); return; }
+
+  const session = state.sessions.find(s => s.id === state.activeSessionId);
+  const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+
+  document.getElementById('main-title').textContent = session?.name || session?.id.slice(0, 8) || 'Session';
+  document.getElementById('main-meta').textContent = workspace?.cwd || '';
+  document.getElementById('main-actions').innerHTML = `
+    <button class="btn btn-sm btn-danger" onclick="deleteSession('${state.activeSessionId}')">Delete</button>
+  `;
+
+  document.getElementById('empty-state').classList.add('hidden');
+  document.getElementById('messages-feed').classList.remove('hidden');
+  document.getElementById('input-bar').classList.remove('hidden');
+
+  // Load messages from the server
+  const msgs = await api('GET', `/sessions/${state.activeSessionId}/messages`);
+  state.messages[state.activeSessionId] = msgs.map(m => ({
+    id: m.id,
+    prompt: m.prompt,
+    status: m.status,
+    result: m.result,
+    events: m.events || [],
+    lastEventId: m.events?.length ? m.events[m.events.length - 1].id : 0,
+  }));
+
+  // Resume polling for any active messages
+  for (const m of state.messages[state.activeSessionId]) {
+    if (m.status === 'pending' || m.status === 'streaming') {
+      startPolling(m.id);
+    }
+  }
+
+  renderMessages();
+}
+
+async function loadMessages() {
+  // Get session messages by querying each known message
+  // For now, we track messages client-side per session
+  const feed = document.getElementById('messages-feed');
+  if (!state.messages[state.activeSessionId]) {
+    state.messages[state.activeSessionId] = [];
+  }
+  renderMessages();
+}
+
+function renderMessages() {
+  const feed = document.getElementById('messages-feed');
+  const msgs = state.messages[state.activeSessionId] || [];
+
+  if (msgs.length === 0) {
+    feed.innerHTML = '<div style="color: var(--text-dim); text-align: center; margin-top: 40px; font-size: 13px;">No messages yet. Send a prompt to begin.</div>';
+    return;
+  }
+
+  feed.innerHTML = msgs.map(m => `
+    <div class="message-group" id="msg-${m.id}">
+      <div class="message-prompt">
+        <div class="label">You</div>
+        ${esc(m.prompt)}
+      </div>
+      <div class="message-events" id="events-${m.id}">
+        ${renderEvents(m)}
+      </div>
+    </div>
+  `).join('');
+
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function renderEvents(msg) {
+  if (!msg.events || msg.events.length === 0) {
+    if (msg.status === 'pending' || msg.status === 'streaming') {
+      return '<div class="event"><span class="event-type">waiting...</span></div>';
+    }
+    return '';
+  }
+
+  return msg.events.map(e => {
+    if (e.data?.type === 'assistant') {
+      const text = extractAssistantText(e.data);
+      if (!text) return '';
+      return `<div class="event"><div class="event-assistant">${esc(text)}</div></div>`;
+    }
+    if (e.type?.startsWith('result')) {
+      const isError = e.data?.is_error;
+      return `<div class="event"><div class="event-result ${isError ? 'error' : ''}">
+        ${e.data?.result ? esc(e.data.result) : (e.data?.error || 'Done')}
+        <div class="cost">${e.data?.total_cost_usd ? '$' + e.data.total_cost_usd.toFixed(4) : ''} ${e.data?.duration_ms ? (e.data.duration_ms / 1000).toFixed(1) + 's' : ''}</div>
+      </div></div>`;
+    }
+    if (e.data?.type === 'system' && e.data?.subtype === 'init') return '';
+    return '';
+  }).join('');
+}
+
+function extractAssistantText(data) {
+  if (!data?.message?.content) return '';
+  return data.message.content
+    .filter(c => c.type === 'text')
+    .map(c => c.text)
+    .join('');
+}
+
+// --- Send message ---
+async function sendMessage() {
+  if (!state.activeSessionId) return;
+  const input = document.getElementById('prompt-input');
+  const prompt = input.value.trim();
+  if (!prompt) return;
+  input.value = '';
+
+  const res = await api('POST', `/sessions/${state.activeSessionId}/messages`, { prompt });
+  if (res.error) { alert(res.error); return; }
+
+  if (!state.messages[state.activeSessionId]) {
+    state.messages[state.activeSessionId] = [];
+  }
+  state.messages[state.activeSessionId].push({
+    id: res.id,
+    prompt,
+    status: 'pending',
+    events: [],
+    lastEventId: 0,
+  });
+
+  renderMessages();
+  startPolling(res.id);
+}
+
+function startPolling(messageId) {
+  if (state.pollTimers[messageId]) return;
+  state.pollTimers[messageId] = setInterval(() => pollMessage(messageId), 1000);
+}
+
+async function pollMessage(messageId) {
+  const msgs = state.messages[state.activeSessionId];
+  if (!msgs) return;
+  const msg = msgs.find(m => m.id === messageId);
+  if (!msg) return;
+
+  const data = await api('GET', `/messages/${messageId}?after=${msg.lastEventId}`);
+  if (!data) return;
+
+  msg.status = data.status;
+  msg.result = data.result;
+  msg.costUsd = data.costUsd;
+  msg.durationMs = data.durationMs;
+
+  if (data.events && data.events.length > 0) {
+    msg.events.push(...data.events);
+    msg.lastEventId = data.events[data.events.length - 1].id;
+  }
+
+  renderMessages();
+
+  // Also refresh session status in sidebar
+  loadSessions();
+
+  if (data.status === 'complete' || data.status === 'error') {
+    clearInterval(state.pollTimers[messageId]);
+    delete state.pollTimers[messageId];
+  }
+}
+
+async function deleteSession(id) {
+  await api('DELETE', `/sessions/${id}`);
+  delete state.messages[id];
+  state.activeSessionId = null;
+  showEmptyState();
+  await loadSessions();
+}
+
+// --- UI helpers ---
+function showEmptyState() {
+  document.getElementById('main-title').textContent = 'Select a session';
+  document.getElementById('main-meta').textContent = '';
+  document.getElementById('main-actions').innerHTML = '';
+  document.getElementById('empty-state').classList.remove('hidden');
+  document.getElementById('messages-feed').classList.add('hidden');
+  document.getElementById('input-bar').classList.add('hidden');
+}
+
+function showDialog(id) { document.getElementById(id).classList.remove('hidden'); }
+function hideDialog(id) { document.getElementById(id).classList.add('hidden'); }
+
+function esc(str) {
+  if (!str) return '';
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+// Close dialogs on overlay click
+document.querySelectorAll('.dialog-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.add('hidden'); });
+});
+
+// Boot
+loadWorkspaces();
+</script>
+</body>
+</html>
