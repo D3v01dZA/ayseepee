@@ -1,4 +1,4 @@
-import { readdirSync, statSync, realpathSync } from "node:fs";
+import { readdir, stat, realpath } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
 import { Router, type RouteContext } from "../router.js";
 
@@ -12,7 +12,7 @@ interface FileEntry {
   size: number | null;
 }
 
-function listFiles(ctx: RouteContext) {
+async function listFiles(ctx: RouteContext) {
   const body = ctx.body as {
     root?: string;
     open?: string[];
@@ -25,7 +25,7 @@ function listFiles(ctx: RouteContext) {
 
   let root: string;
   try {
-    root = realpathSync(resolve(body.root));
+    root = await realpath(resolve(body.root));
   } catch {
     return { status: 400, body: { error: `Directory not found: ${body.root}` } };
   }
@@ -44,23 +44,24 @@ function listFiles(ctx: RouteContext) {
     }
 
     try {
-      let entries = readdirSync(abs, { withFileTypes: true });
+      let entries = await readdir(abs, { withFileTypes: true });
       if (!showHidden) {
         entries = entries.filter((e) => !e.name.startsWith("."));
       }
-      result[dir === "." ? "/" : "/" + rel] = entries
-        .map((e): FileEntry => {
+
+      const fileEntries: FileEntry[] = await Promise.all(
+        entries.map(async (e): Promise<FileEntry> => {
           let size: number | null = null;
           let type: FileEntry["type"] = "other";
 
           try {
-            // statSync follows symlinks, so this resolves the target type
-            const stat = statSync(join(abs, e.name));
-            if (stat.isDirectory()) {
+            // stat follows symlinks, so this resolves the target type
+            const s = await stat(join(abs, e.name));
+            if (s.isDirectory()) {
               type = "directory";
-            } else if (stat.isFile()) {
+            } else if (s.isFile()) {
               type = "file";
-              size = stat.size;
+              size = s.size;
             }
           } catch {
             // broken symlink, permission denied, etc
@@ -68,12 +69,14 @@ function listFiles(ctx: RouteContext) {
 
           return { name: e.name, type, size };
         })
-        .sort((a, b) => {
-          // directories first, then alphabetical
-          if (a.type === "directory" && b.type !== "directory") return -1;
-          if (a.type !== "directory" && b.type === "directory") return 1;
-          return a.name.localeCompare(b.name);
-        });
+      );
+
+      result[dir === "." ? "/" : "/" + rel] = fileEntries.sort((a, b) => {
+        // directories first, then alphabetical
+        if (a.type === "directory" && b.type !== "directory") return -1;
+        if (a.type !== "directory" && b.type === "directory") return 1;
+        return a.name.localeCompare(b.name);
+      });
     } catch {
       // directory doesn't exist or can't be read — skip it
     }

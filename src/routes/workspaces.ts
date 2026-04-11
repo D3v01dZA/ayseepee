@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { Router, type RouteContext } from "../router.js";
 import { getDb } from "../db.js";
 
@@ -11,7 +11,7 @@ export function registerWorkspaceRoutes(router: Router): void {
   router.delete("/api/v1/workspaces/:id", deleteWorkspace);
 }
 
-function createWorkspace(ctx: RouteContext) {
+async function createWorkspace(ctx: RouteContext) {
   const body = ctx.body as {
     name?: string;
     cwd?: string;
@@ -26,7 +26,7 @@ function createWorkspace(ctx: RouteContext) {
 
   let cwd: string;
   try {
-    cwd = realpathSync(body.cwd);
+    cwd = await realpath(body.cwd);
   } catch {
     return { status: 400, body: { error: `Directory not found: ${body.cwd}` } };
   }
@@ -61,7 +61,7 @@ function getWorkspace(ctx: RouteContext) {
   return { status: 200, body: rowToWorkspace(row) };
 }
 
-function updateWorkspace(ctx: RouteContext) {
+async function updateWorkspace(ctx: RouteContext) {
   const db = getDb();
   const existing = db.prepare("SELECT * FROM workspaces WHERE id = ?").get(ctx.params.id);
   if (!existing) return { status: 404, body: { error: "Workspace not found" } };
@@ -78,7 +78,7 @@ function updateWorkspace(ctx: RouteContext) {
   }
   if ("cwd" in body) {
     try {
-      const resolved = realpathSync(body.cwd as string);
+      const resolved = await realpath(body.cwd as string);
       fields.push("cwd = ?");
       values.push(resolved);
     } catch {

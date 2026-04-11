@@ -1,5 +1,5 @@
 import { IncomingMessage, ServerResponse } from "node:http";
-import { readFileSync, existsSync } from "node:fs";
+import { readFile, access } from "node:fs/promises";
 import { join, extname } from "node:path";
 
 export type RouteParams = Record<string, string>;
@@ -136,14 +136,17 @@ export class Router {
         log(method, pathname, 403, start);
         return;
       }
-      if (existsSync(fullPath)) {
+      try {
+        await access(fullPath);
         const ext = extname(fullPath);
         const contentType = MIME_TYPES[ext] ?? "application/octet-stream";
-        const content = readFileSync(fullPath);
+        const content = await readFile(fullPath);
         res.writeHead(200, { "Content-Type": contentType });
         res.end(content);
         log(method, pathname, 200, start);
         return;
+      } catch {
+        // file doesn't exist, fall through to 404
       }
     }
 
