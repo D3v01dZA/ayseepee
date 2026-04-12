@@ -111,14 +111,34 @@
   .filepicker-item:hover { background: rgba(255,255,255,0.05); }
   .filepicker-icon { width: 16px; text-align: center; font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
 
+  /* Hamburger */
+  .hamburger { display: none; background: none; border: none; color: var(--text); font-size: 20px; cursor: pointer; padding: 4px 8px; line-height: 1; }
+  .sidebar-overlay { display: none; }
+
   /* Toast */
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--red); color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 13px; z-index: 200; max-width: 500px; text-align: center; }
+
+  /* Mobile */
+  @media (max-width: 640px) {
+    #app { grid-template-columns: 1fr; }
+    .sidebar { position: fixed; inset: 0; z-index: 50; width: 280px; transform: translateX(-100%); transition: transform 0.2s ease; }
+    .sidebar.open { transform: translateX(0); }
+    .sidebar-overlay { display: none; position: fixed; inset: 0; z-index: 49; background: rgba(0,0,0,0.5); }
+    .sidebar-overlay.open { display: block; }
+    .hamburger { display: block; }
+    .main-header { gap: 8px; }
+    .main-header > div:last-child { display: flex; flex-wrap: wrap; gap: 4px; }
+    .messages { padding: 12px; }
+    .message-events { margin-left: 6px; padding-left: 8px; }
+    .input-bar { padding: 8px 12px; }
+  }
 </style>
 </head>
 <body>
 
 <div id="app">
-  <div class="sidebar">
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+  <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <h1>ayseepee <span>v1</span></h1>
     </div>
@@ -134,7 +154,7 @@
   </div>
 
   <div class="main" id="main-panel">
-    <div class="main-header"><h2>Select a session</h2></div>
+    <div class="main-header"><button class="hamburger" onclick="toggleSidebar()">&#9776;</button><h2>Select a session</h2></div>
     <div class="main-empty">Create a workspace and session to get started</div>
   </div>
 </div>
@@ -237,10 +257,11 @@ document.body.addEventListener('htmx:beforeSwap', (e) => {
   }
 });
 
-// Auto-scroll messages feed
+// Auto-scroll messages feed and close sidebar on navigation
 document.body.addEventListener('htmx:afterSwap', (e) => {
   const feed = document.getElementById('messages-feed');
   if (feed) feed.scrollTop = feed.scrollHeight;
+  closeSidebar();
 });
 
 // Track active workspace ID from data attribute on workspace list
@@ -359,6 +380,7 @@ async function createWorkspace() {
   const ws = await api('POST', '/workspaces', { name, cwd, permissionMode });
   hideDialog('dialog-workspace');
   htmx.ajax('GET', '/views/workspaces/' + ws.id + '/activate', { target: '#session-list', swap: 'outerHTML' });
+  showCreateSession();
 }
 
 async function deleteWorkspace(id) {
@@ -412,6 +434,15 @@ async function renameSession(sid) {
 }
 
 // --- UI helpers ---
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-overlay').classList.toggle('open');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('open');
+}
+
 function showDialog(id) { document.getElementById(id).classList.remove('hidden'); }
 function hideDialog(id) { document.getElementById(id).classList.add('hidden'); }
 

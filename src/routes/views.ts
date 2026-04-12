@@ -64,6 +64,7 @@ function renderSessionHeader(session: SessionRow, workspace: WorkspaceRow, oob =
   const modelVal = session.model || "";
   const inheritLabel = permModeLabel(workspace.permission_mode);
   return `<div class="main-header" id="session-header"${oobAttr}>
+    <button class="hamburger" onclick="toggleSidebar()">&#9776;</button>
     <div>
       <h2 id="main-title" onclick="renameSession('${session.id}')" style="cursor:pointer" title="Click to rename">${esc(session.name || session.id.slice(0, 8))}</h2>
       <div class="meta">${esc(workspace.cwd)}</div>
@@ -290,7 +291,7 @@ function initView() {
         renderWorkspaceList(workspaces, workspace.id, true),
         renderSessionList(sessions, undefined, true),
         `<div id="main-panel" class="main" hx-swap-oob="innerHTML">
-          <div class="main-header"><h2>Select a session</h2></div>
+          <div class="main-header"><button class="hamburger" onclick="toggleSidebar()">&#9776;</button><h2>Select a session</h2></div>
           <div class="main-empty">Create a session to get started</div>
         </div>`,
       ].join("\n"),
@@ -344,7 +345,7 @@ function activateWorkspaceView(ctx: RouteContext) {
       renderSessionList(sessions),
       renderWorkspaceList(Workspaces.listWorkspaces(), wid, true),
       `<div id="main-panel" class="main" hx-swap-oob="innerHTML">
-        <div class="main-header"><h2>Select a session</h2></div>
+        <div class="main-header"><button class="hamburger" onclick="toggleSidebar()">&#9776;</button><h2>Select a session</h2></div>
         <div class="main-empty">Create a session to get started</div>
       </div>`,
     ].join("\n"),
