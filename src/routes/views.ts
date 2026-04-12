@@ -1,5 +1,6 @@
 import { Router, type RouteContext } from "../router.js";
 import { runQuery } from "../agent.js";
+import * as Settings from "../data/settings.js";
 import * as Workspaces from "../data/workspaces.js";
 import * as Sessions from "../data/sessions.js";
 import * as Messages from "../data/messages.js";
@@ -16,6 +17,8 @@ function esc(s: string | null | undefined): string {
 // --- Route registration ---
 export function registerViewRoutes(router: Router): void {
   router.get("/views/init", initView);
+  router.get("/views/settings", settingsView);
+  router.patch("/views/settings", updateSettingsView);
   router.get("/views/workspaces", listWorkspacesView);
   router.get("/views/workspaces/:wid/activate", activateWorkspaceView);
   router.get("/views/sessions/:sid/activate", activateSessionView);
@@ -61,8 +64,10 @@ function renderSessionList(sessions: SessionRow[], activeId?: string, oob = fals
 
 function renderSessionHeader(session: SessionRow, workspace: WorkspaceRow, oob = false): string {
   const oobAttr = oob ? ` hx-swap-oob="outerHTML"` : "";
+  const settings = Settings.getSettings();
   const modelVal = session.model || "";
-  const inheritLabel = permModeLabel(workspace.permission_mode);
+  const inheritedModel = shortModel(workspace.model || settings.model);
+  const inheritedPerm = permModeLabel(workspace.permission_mode || settings.permission_mode);
   return `<div class="main-header" id="session-header"${oobAttr}>
     <button class="hamburger" onclick="toggleSidebar()">&#9776;</button>
     <div>
@@ -74,7 +79,8 @@ function renderSessionHeader(session: SessionRow, workspace: WorkspaceRow, oob =
               hx-patch="/views/sessions/${session.id}"
               hx-target="#session-header" hx-swap="outerHTML"
               hx-include="this">
-        <option value="sonnet"${!modelVal || modelVal === "sonnet" ? " selected" : ""}>Sonnet</option>
+        <option value=""${!modelVal ? " selected" : ""}>(inherit: ${esc(inheritedModel)})</option>
+        <option value="sonnet"${modelVal === "sonnet" ? " selected" : ""}>Sonnet</option>
         <option value="opus"${modelVal === "opus" ? " selected" : ""}>Opus</option>
         <option value="haiku"${modelVal === "haiku" ? " selected" : ""}>Haiku</option>
       </select>
@@ -82,7 +88,7 @@ function renderSessionHeader(session: SessionRow, workspace: WorkspaceRow, oob =
               hx-patch="/views/sessions/${session.id}"
               hx-target="#session-header" hx-swap="outerHTML"
               hx-include="this">
-        <option value=""${!session.permission_mode ? " selected" : ""}>(inherit: ${esc(inheritLabel)})</option>
+        <option value=""${!session.permission_mode ? " selected" : ""}>(inherit: ${esc(inheritedPerm)})</option>
         <option value="default"${session.permission_mode === "default" ? " selected" : ""}>Default</option>
         <option value="acceptEdits"${session.permission_mode === "acceptEdits" ? " selected" : ""}>Accept Edits</option>
         <option value="bypassPermissions"${session.permission_mode === "bypassPermissions" ? " selected" : ""}>Bypass Permissions</option>
@@ -166,8 +172,8 @@ function renderEvent(e: MessageEventRow): string {
     const parts: string[] = [];
     const content = data.message?.content || [];
     for (const block of content) {
-      if (block.type === "text" && block.text) {
-        parts.push(`<div class="event-assistant">${esc(block.text)}</div>`);
+      if (block.type === "text" && block.text?.trim()) {
+        parts.push(`<div class="event-assistant">${esc(block.text.trim())}</div>`);
       } else if (block.type === "tool_use") {
         parts.push(`<div class="event-tool-use">
           <span class="tool-name">${esc(block.name)}</span>
@@ -414,6 +420,8 @@ function sendMessageView(ctx: RouteContext) {
   const workspace = Workspaces.getWorkspace(session.workspace_id);
   if (!workspace) return { status: 500, html: "" };
 
+  const resolved = Settings.resolveSettings(Settings.getSettings(), workspace, session);
+
   // Auto-name session from first prompt
   if (!session.name) {
     Sessions.autoNameSession(sid, prompt);
@@ -427,10 +435,10 @@ function sendMessageView(ctx: RouteContext) {
     prompt,
     cwd: workspace.cwd,
     agentSessionId: session.agent_session_id,
-    allowedTools: workspace.allowed_tools ? JSON.parse(workspace.allowed_tools) : null,
+    allowedTools: resolved.allowedTools,
     systemPrompt: workspace.system_prompt,
-    permissionMode: session.permission_mode || workspace.permission_mode || "default",
-    model: session.model ?? null,
+    permissionMode: resolved.permissionMode,
+    model: resolved.model,
     maxTurns: null,
     maxBudgetUsd: null,
   });
@@ -467,6 +475,61 @@ function updateSessionView(ctx: RouteContext) {
     status: 200,
     html: renderSessionHeader(updated, workspace) + renderSessionList(Sessions.listSessions(updated.workspace_id), sid, true),
   };
+}
+
+function settingsView() {
+  return { status: 200, html: renderSettingsPanel(Settings.getSettings()) };
+}
+
+function updateSettingsView(ctx: RouteContext) {
+  const body = ctx.body as Record<string, string> | undefined;
+  if (!body) return { status: 400, html: "" };
+
+  const allowedTools = body.allowedTools?.trim()
+    ? body.allowedTools.split("\n").map(s => s.trim()).filter(Boolean)
+    : null;
+
+  const updated = Settings.updateSettings({
+    model: body.model || undefined,
+    permissionMode: body.permissionMode || undefined,
+    allowedTools,
+  });
+
+  return { status: 200, html: renderSettingsPanel(updated) };
+}
+
+function renderSettingsPanel(settings: import("../types.js").SettingsRow): string {
+  const tools = settings.allowed_tools ? JSON.parse(settings.allowed_tools).join("\n") : "";
+  return `<div id="settings-panel">
+    <div class="main-header">
+      <button class="hamburger" onclick="toggleSidebar()">&#9776;</button>
+      <h2>Global Settings</h2>
+    </div>
+    <div style="padding:20px;max-width:500px">
+      <form hx-patch="/views/settings" hx-target="#settings-panel" hx-swap="outerHTML">
+        <label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px">Default Model</label>
+        <select name="model" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;margin-bottom:12px">
+          <option value="sonnet"${settings.model === "sonnet" ? " selected" : ""}>Sonnet</option>
+          <option value="opus"${settings.model === "opus" ? " selected" : ""}>Opus</option>
+          <option value="haiku"${settings.model === "haiku" ? " selected" : ""}>Haiku</option>
+        </select>
+        <label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px">Default Permission Mode</label>
+        <select name="permissionMode" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;margin-bottom:12px">
+          <option value="default"${settings.permission_mode === "default" ? " selected" : ""}>Default</option>
+          <option value="acceptEdits"${settings.permission_mode === "acceptEdits" ? " selected" : ""}>Accept Edits</option>
+          <option value="bypassPermissions"${settings.permission_mode === "bypassPermissions" ? " selected" : ""}>Bypass Permissions</option>
+          <option value="plan"${settings.permission_mode === "plan" ? " selected" : ""}>Plan</option>
+        </select>
+        <label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px">Default Allowed Tools <span style="font-style:italic">(one per line)</span></label>
+        <textarea name="allowedTools" rows="6" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical;margin-bottom:4px" placeholder="e.g.&#10;Read&#10;Glob&#10;Grep&#10;Bash(git *)&#10;Bash(npm *)">${esc(tools)}</textarea>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:16px">
+          Tool names: Read, Edit, Write, Glob, Grep, Bash<br>
+          Bash patterns: Bash(git *), Bash(npm *), Bash(*)
+        </div>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </form>
+    </div>
+  </div>`;
 }
 
 function resolvePermissionView(ctx: RouteContext) {

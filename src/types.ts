@@ -1,5 +1,12 @@
 // --- Database row types (snake_case, matching SQL schema) ---
 
+export interface SettingsRow {
+  id: number;
+  model: string;
+  permission_mode: string;
+  allowed_tools: string | null;
+}
+
 export interface WorkspaceRow {
   id: string;
   name: string;
@@ -7,6 +14,7 @@ export interface WorkspaceRow {
   allowed_tools: string | null;
   system_prompt: string | null;
   permission_mode: string;
+  model: string | null;
   created_at: string;
 }
 
@@ -17,6 +25,7 @@ export interface SessionRow {
   agent_session_id: string | null;
   model: string | null;
   permission_mode: string | null;
+  allowed_tools: string | null;
   status: "idle" | "active" | "error";
   created_at: string;
   last_active_at: string;
@@ -58,12 +67,19 @@ export interface PermissionRequestRow {
 
 // --- API request body types ---
 
+export interface UpdateSettingsBody {
+  model?: string;
+  permissionMode?: string;
+  allowedTools?: string[] | null;
+}
+
 export interface CreateWorkspaceBody {
   name: string;
   cwd: string;
   allowedTools?: string[];
   systemPrompt?: string;
   permissionMode?: string;
+  model?: string;
 }
 
 export interface UpdateWorkspaceBody {
@@ -72,18 +88,21 @@ export interface UpdateWorkspaceBody {
   allowedTools?: string[] | null;
   systemPrompt?: string | null;
   permissionMode?: string;
+  model?: string | null;
 }
 
 export interface CreateSessionBody {
   name?: string;
   model?: string;
   permissionMode?: string;
+  allowedTools?: string[];
 }
 
 export interface UpdateSessionBody {
   name?: string;
   model?: string;
   permissionMode?: string;
+  allowedTools?: string[] | null;
 }
 
 export interface SendMessageBody {
@@ -106,6 +125,12 @@ export interface ListFilesBody {
 
 // --- API response types ---
 
+export interface SettingsResponse {
+  model: string;
+  permissionMode: string;
+  allowedTools: string[] | null;
+}
+
 export interface WorkspaceResponse {
   id: string;
   name: string;
@@ -113,6 +138,7 @@ export interface WorkspaceResponse {
   allowedTools: string[] | null;
   systemPrompt: string | null;
   permissionMode: string;
+  model: string | null;
   createdAt: string;
 }
 
@@ -123,6 +149,7 @@ export interface SessionResponse {
   agentSessionId: string | null;
   model: string | null;
   permissionMode: string | null;
+  allowedTools: string[] | null;
   status: string;
   createdAt: string;
   lastActiveAt: string;

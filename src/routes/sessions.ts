@@ -1,5 +1,6 @@
 import { Router, type RouteContext } from "../router.js";
 import { runQuery, interruptQuery } from "../agent.js";
+import * as Settings from "../data/settings.js";
 import * as Workspaces from "../data/workspaces.js";
 import * as Sessions from "../data/sessions.js";
 import * as Messages from "../data/messages.js";
@@ -122,6 +123,8 @@ function sendMessage(ctx: RouteContext) {
   const workspace = Workspaces.getWorkspace(session.workspace_id);
   if (!workspace) return { status: 500, body: { error: "Workspace not found for session" } };
 
+  const resolved = Settings.resolveSettings(Settings.getSettings(), workspace, session);
+
   // Auto-name session from first prompt if unnamed
   if (!session.name) {
     Sessions.autoNameSession(sessionId, body.prompt);
@@ -135,10 +138,10 @@ function sendMessage(ctx: RouteContext) {
     prompt: body.prompt,
     cwd: workspace.cwd,
     agentSessionId: session.agent_session_id,
-    allowedTools: workspace.allowed_tools ? JSON.parse(workspace.allowed_tools) : null,
+    allowedTools: resolved.allowedTools,
     systemPrompt: workspace.system_prompt,
-    permissionMode: session.permission_mode || workspace.permission_mode || "default",
-    model: body.model ?? session.model ?? null,
+    permissionMode: resolved.permissionMode,
+    model: body.model ?? resolved.model,
     maxTurns: body.maxTurns ?? null,
     maxBudgetUsd: body.maxBudgetUsd ?? null,
   });
@@ -230,6 +233,7 @@ function rowToSession(row: SessionRow): SessionResponse {
     agentSessionId: row.agent_session_id,
     model: row.model,
     permissionMode: row.permission_mode,
+    allowedTools: row.allowed_tools ? JSON.parse(row.allowed_tools) : null,
     status: row.status,
     createdAt: row.created_at,
     lastActiveAt: row.last_active_at,

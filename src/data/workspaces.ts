@@ -16,12 +16,13 @@ export function createWorkspace(params: {
   allowedTools?: string[];
   systemPrompt?: string;
   permissionMode?: string;
+  model?: string;
 }): WorkspaceRow {
   const db = getDb();
   const id = randomUUID();
   db.prepare(
-    `INSERT INTO workspaces (id, name, cwd, allowed_tools, system_prompt, permission_mode)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT INTO workspaces (id, name, cwd, allowed_tools, system_prompt, permission_mode, model)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     params.name,
@@ -29,6 +30,7 @@ export function createWorkspace(params: {
     params.allowedTools ? JSON.stringify(params.allowedTools) : null,
     params.systemPrompt ?? null,
     params.permissionMode ?? "default",
+    params.model ?? null,
   );
   return db.prepare("SELECT * FROM workspaces WHERE id = ?").get(id) as WorkspaceRow;
 }
@@ -39,6 +41,7 @@ export function updateWorkspace(id: string, fields: {
   allowedTools?: string[] | null;
   systemPrompt?: string | null;
   permissionMode?: string;
+  model?: string | null;
 }): WorkspaceRow {
   const db = getDb();
   const sets: string[] = [];
@@ -52,6 +55,7 @@ export function updateWorkspace(id: string, fields: {
   }
   if (fields.systemPrompt !== undefined) { sets.push("system_prompt = ?"); values.push(fields.systemPrompt ?? null); }
   if (fields.permissionMode !== undefined) { sets.push("permission_mode = ?"); values.push(fields.permissionMode || "default"); }
+  if (fields.model !== undefined) { sets.push("model = ?"); values.push(fields.model || null); }
 
   values.push(id);
   db.prepare(`UPDATE workspaces SET ${sets.join(", ")} WHERE id = ?`).run(...values);

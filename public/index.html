@@ -151,6 +151,9 @@
       <h2>Sessions <button class="btn btn-sm" onclick="showCreateSession()">+</button></h2>
     </div>
     <ul id="session-list" class="sidebar-list"></ul>
+    <div class="sidebar-section" style="margin-top:auto">
+      <button class="btn btn-sm" style="width:100%" hx-get="/views/settings" hx-target="#main-panel" hx-swap="innerHTML">Settings</button>
+    </div>
   </div>
 
   <div class="main" id="main-panel">
@@ -170,9 +173,17 @@
     </div>
     <label>Name</label>
     <input type="text" id="ws-name" placeholder="my-project">
-    <label>Permission Mode</label>
+    <label>Model (optional, inherits from global)</label>
+    <select id="ws-model">
+      <option value="" selected>(inherit from global)</option>
+      <option value="sonnet">Sonnet</option>
+      <option value="opus">Opus</option>
+      <option value="haiku">Haiku</option>
+    </select>
+    <label>Permission Mode (optional, inherits from global)</label>
     <select id="ws-permission">
-      <option value="default" selected>Default</option>
+      <option value="" selected>(inherit)</option>
+      <option value="default">Default</option>
       <option value="acceptEdits">Accept Edits</option>
       <option value="bypassPermissions">Bypass Permissions</option>
       <option value="plan">Plan</option>
@@ -190,13 +201,14 @@
     <h3>New Session</h3>
     <label>Name (optional)</label>
     <input type="text" id="sess-name" placeholder="bug-fix">
-    <label>Model</label>
+    <label>Model (optional, inherits from workspace/global)</label>
     <select id="sess-model">
-      <option value="sonnet" selected>Sonnet</option>
+      <option value="" selected>(inherit)</option>
+      <option value="sonnet">Sonnet</option>
       <option value="opus">Opus</option>
       <option value="haiku">Haiku</option>
     </select>
-    <label>Permission Mode (optional, inherits from workspace)</label>
+    <label>Permission Mode (optional, inherits from workspace/global)</label>
     <select id="sess-permission">
       <option value="">(inherit from workspace)</option>
       <option value="default">Default</option>
@@ -300,12 +312,19 @@ function showError(msg) {
 let pickerCwd = '/';
 let pickerOpen = new Set();
 
-function showCreateWorkspace() {
+async function showCreateWorkspace() {
   document.getElementById('ws-name').value = '';
+  document.getElementById('ws-model').value = '';
+  document.getElementById('ws-permission').value = '';
   pickerCwd = '/';
   pickerOpen.clear();
   showDialog('dialog-workspace');
   loadPicker();
+  try {
+    const s = await api('GET', '/settings');
+    document.querySelector('#ws-model option[value=""]').textContent = '(inherit: ' + modelLabel(s.model) + ')';
+    document.querySelector('#ws-permission option[value=""]').textContent = '(inherit: ' + permLabel(s.permissionMode) + ')';
+  } catch {}
 }
 
 async function loadPicker() {
@@ -375,9 +394,13 @@ function pickerToggle(relPath) {
 async function createWorkspace() {
   const name = document.getElementById('ws-name').value.trim();
   const cwd = pickerCwd;
+  const model = document.getElementById('ws-model').value;
   const permissionMode = document.getElementById('ws-permission').value;
   if (!name || !cwd || cwd === '/') { showError('Select a directory and enter a name'); return; }
-  const ws = await api('POST', '/workspaces', { name, cwd, permissionMode });
+  const body = { name, cwd };
+  if (model) body.model = model;
+  if (permissionMode) body.permissionMode = permissionMode;
+  const ws = await api('POST', '/workspaces', body);
   hideDialog('dialog-workspace');
   htmx.ajax('GET', '/views/workspaces/' + ws.id + '/activate', { target: '#session-list', swap: 'outerHTML' });
   showCreateSession();
@@ -397,20 +420,31 @@ async function deleteWorkspace(id) {
 }
 
 // --- Session CRUD ---
-function showCreateSession() {
+async function showCreateSession() {
   if (!activeWorkspaceId) { showError('Select a workspace first'); return; }
   document.getElementById('sess-name').value = '';
-  document.getElementById('sess-model').value = 'sonnet';
+  document.getElementById('sess-model').value = '';
   document.getElementById('sess-permission').value = '';
   showDialog('dialog-session');
+  try {
+    const [s, ws] = await Promise.all([
+      api('GET', '/settings'),
+      api('GET', '/workspaces/' + activeWorkspaceId),
+    ]);
+    const inheritModel = modelLabel(ws.model || s.model);
+    const inheritPerm = permLabel(ws.permissionMode || s.permissionMode);
+    document.querySelector('#sess-model option[value=""]').textContent = '(inherit: ' + inheritModel + ')';
+    document.querySelector('#sess-permission option[value=""]').textContent = '(inherit: ' + inheritPerm + ')';
+  } catch {}
 }
 
 async function createSession() {
   const name = document.getElementById('sess-name').value.trim();
   const model = document.getElementById('sess-model').value;
   const permissionMode = document.getElementById('sess-permission').value;
-  const body = { model };
+  const body = {};
   if (name) body.name = name;
+  if (model) body.model = model;
   if (permissionMode) body.permissionMode = permissionMode;
   const s = await api('POST', '/workspaces/' + activeWorkspaceId + '/sessions', body);
   hideDialog('dialog-session');
@@ -445,6 +479,9 @@ function closeSidebar() {
 
 function showDialog(id) { document.getElementById(id).classList.remove('hidden'); }
 function hideDialog(id) { document.getElementById(id).classList.add('hidden'); }
+
+function modelLabel(m) { return {sonnet:'Sonnet',opus:'Opus',haiku:'Haiku'}[m] || m || 'Sonnet'; }
+function permLabel(m) { return {default:'Default',acceptEdits:'Accept Edits',bypassPermissions:'Bypass Permissions',plan:'Plan'}[m] || m || 'Default'; }
 
 function esc(str) {
   if (!str) return '';

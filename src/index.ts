@@ -6,6 +6,7 @@ import { initDb } from "./db.js";
 import { registerWorkspaceRoutes } from "./routes/workspaces.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerFileRoutes } from "./routes/files.js";
+import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerViewRoutes } from "./routes/views.js";
 import { interruptAllQueries } from "./agent.js";
 
@@ -29,6 +30,7 @@ router.setStaticDir(join(__dirname, "..", "public"));
 registerWorkspaceRoutes(router);
 registerSessionRoutes(router);
 registerFileRoutes(router);
+registerSettingsRoutes(router);
 registerViewRoutes(router);
 
 const server = createServer((req, res) => {

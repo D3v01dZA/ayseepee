@@ -31,6 +31,7 @@ async function createWorkspace(ctx: RouteContext) {
     allowedTools: body.allowedTools,
     systemPrompt: body.systemPrompt,
     permissionMode: body.permissionMode,
+    model: body.model,
   });
 
   return { status: 201, body: rowToWorkspace(row) };
@@ -68,6 +69,7 @@ async function updateWorkspace(ctx: RouteContext) {
   if (body.allowedTools !== undefined) { fields.allowedTools = body.allowedTools; hasFields = true; }
   if (body.systemPrompt !== undefined) { fields.systemPrompt = body.systemPrompt; hasFields = true; }
   if (body.permissionMode !== undefined) { fields.permissionMode = body.permissionMode; hasFields = true; }
+  if (body.model !== undefined) { fields.model = body.model; hasFields = true; }
 
   if (!hasFields) return { status: 400, body: { error: "No fields to update" } };
 
@@ -95,6 +97,7 @@ function rowToWorkspace(row: WorkspaceRow): WorkspaceResponse {
     allowedTools: row.allowed_tools ? JSON.parse(row.allowed_tools) : null,
     systemPrompt: row.system_prompt,
     permissionMode: row.permission_mode,
+    model: row.model,
     createdAt: row.created_at,
   };
 }
