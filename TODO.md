@@ -1,8 +1,5 @@
 # TODO
 
-## Typing
-- [x] Fix the types for controllers, strongly define what each input/output type looks like
-
 ## Backend
 - [x] Replace sync fs methods (`readdirSync`, `statSync`, `realpathSync`, `readFileSync`, `existsSync`) with async equivalents
 - [x] Tool execution permission flow — relay SDK permission prompts to clients via API, let web UI approve/deny
@@ -13,5 +10,8 @@
 - [x] Show tool use events in message feed (currently only assistant text and results render)
 - [x] Make mobile friendly with hamburger menu
 
-## Token Usage
+## Misc
 - [ ] Use https://github.com/JuliusBrussee/caveman
+- [x] Fix the types for controllers, strongly define what each input/output type looks like
+- [ ] Allowed tools whitelisting in execute dialog
+- [ ] Message queueing?
