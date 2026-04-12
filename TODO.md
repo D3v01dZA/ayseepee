@@ -3,7 +3,7 @@
 ## Backend
 - [x] Replace sync fs methods (`readdirSync`, `statSync`, `realpathSync`, `readFileSync`, `existsSync`) with async equivalents
 - [x] Tool execution permission flow — relay SDK permission prompts to clients via API, let web UI approve/deny
-- [ ] Granular `allowedTools` support per session (not just workspace level)
+- [x] Granular `allowedTools` support per session (not just workspace level)
 
 ## Frontend
 - [x] Chat "streaming/pending" status indicator disappears too early — keep visible until message is complete
@@ -18,3 +18,5 @@
 - [ ] Use https://github.com/JuliusBrussee/caveman
 - [x] Fix the types for controllers, strongly define what each input/output type looks like
 - [ ] Message queueing?
+- [ ] Message interrupt?
+- [ ] Tool interrupting seems to break everything?

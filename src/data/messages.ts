@@ -54,10 +54,10 @@ export function getPermissionStatus(id: string): string | undefined {
   return row?.status;
 }
 
-export function resolvePermission(id: string, allow: boolean, message?: string): PermissionRequestRow {
+export function resolvePermission(id: string, allow: boolean, opts?: { message?: string; rulePattern?: string; ruleScope?: string }): PermissionRequestRow {
   const db = getDb();
   db.prepare(
-    "UPDATE permission_requests SET status = ?, response = ?, resolved_at = datetime('now') WHERE id = ?"
-  ).run(allow ? "allowed" : "denied", message ?? null, id);
+    "UPDATE permission_requests SET status = ?, response = ?, rule_pattern = ?, rule_scope = ?, resolved_at = datetime('now') WHERE id = ?"
+  ).run(allow ? "allowed" : "denied", opts?.message ?? null, opts?.rulePattern ?? null, opts?.ruleScope ?? null, id);
   return db.prepare("SELECT * FROM permission_requests WHERE id = ?").get(id) as PermissionRequestRow;
 }

@@ -200,8 +200,53 @@ function resolvePermission(ctx: RouteContext) {
     return { status: 400, body: { error: "allow (boolean) is required" } };
   }
 
-  Messages.resolvePermission(id, body.allow, body.message);
-  return { status: 200, body: { id, status: body.allow ? "allowed" : "denied" } };
+  const pattern = body.rulePattern?.trim();
+  const scopes: string[] = [];
+
+  if (pattern && body.allow) {
+    const message = Messages.getMessage(row.message_id);
+    const session = message ? Sessions.getSession(message.session_id) : undefined;
+
+    if (body.addToSession && session) {
+      const existing: string[] = session.allowed_tools ? JSON.parse(session.allowed_tools) : [];
+      if (!existing.includes(pattern)) {
+        existing.push(pattern);
+        Sessions.updateSession(session.id, { allowedTools: existing });
+      }
+      scopes.push("session");
+    }
+
+    if (body.addToWorkspace && session) {
+      const workspace = Workspaces.getWorkspace(session.workspace_id);
+      if (workspace) {
+        const existing: string[] = workspace.allowed_tools ? JSON.parse(workspace.allowed_tools) : [];
+        if (!existing.includes(pattern)) {
+          existing.push(pattern);
+          Workspaces.updateWorkspace(workspace.id, { allowedTools: existing });
+        }
+      }
+      scopes.push("workspace");
+    }
+
+    if (body.addToGlobal) {
+      const settings = Settings.getSettings();
+      const existing: string[] = settings.allowed_tools ? JSON.parse(settings.allowed_tools) : [];
+      if (!existing.includes(pattern)) {
+        existing.push(pattern);
+        Settings.updateSettings({ allowedTools: existing });
+      }
+      scopes.push("global");
+    }
+  }
+
+  const ruleScope = scopes.length > 0 ? scopes.join(", ") : undefined;
+  Messages.resolvePermission(id, body.allow, {
+    message: body.message,
+    rulePattern: pattern,
+    ruleScope,
+  });
+
+  return { status: 200, body: { id, status: body.allow ? "allowed" : "denied", rulePattern: pattern || null, ruleScope: ruleScope || null } };
 }
 
 function parseEvent(e: MessageEventRow): MessageEventResponse {

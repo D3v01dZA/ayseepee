@@ -63,6 +63,8 @@ export interface PermissionRequestRow {
   description: string | null;
   status: "pending" | "allowed" | "denied";
   response: string | null;
+  rule_pattern: string | null;
+  rule_scope: string | null;
   created_at: string;
   resolved_at: string | null;
 }
@@ -121,6 +123,10 @@ export interface SendMessageBody {
 export interface ResolvePermissionBody {
   allow: boolean;
   message?: string;
+  rulePattern?: string;
+  addToSession?: boolean;
+  addToWorkspace?: boolean;
+  addToGlobal?: boolean;
 }
 
 export interface ListFilesBody {

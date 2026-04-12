@@ -25,6 +25,7 @@ export function registerViewRoutes(router: Router): void {
   router.get("/views/poll-message/:mid", pollMessageView);
   router.post("/views/sessions/:sid/messages", sendMessageView);
   router.post("/views/permissions/:id/resolve", resolvePermissionView);
+  router.post("/views/permissions/:id/always-allow", alwaysAllowView);
 }
 
 // --- Render helpers ---
@@ -115,7 +116,14 @@ function renderInputBar(sessionId: string): string {
 
 function renderMessageGroup(message: MessageRow, events: MessageEventRow[]): string {
   const isActive = message.status === "pending" || message.status === "streaming";
-  const pollAttr = isActive
+  // Don't poll while a permission is pending — it resets the interactive form
+  const hasPendingPerm = events.some(e => {
+    if (e.event_type !== "permission_request") return false;
+    const d = JSON.parse(e.data);
+    const status = Messages.getPermissionStatus(d.id);
+    return !status || status === "pending";
+  });
+  const pollAttr = isActive && !hasPendingPerm
     ? ` hx-get="/views/poll-message/${message.id}" hx-trigger="every 1s" hx-swap="outerHTML"`
     : "";
   return `<div class="message-group" id="msg-${message.id}"${pollAttr}>
@@ -136,7 +144,7 @@ function renderEvents(message: MessageRow, events: MessageEventRow[]): string {
     return isActive ? `<div class="event"><span class="event-type">waiting...</span></div>` : "";
   }
 
-  const rendered = events.map(e => renderEvent(e)).join("");
+  const rendered = events.map(e => renderEvent(e, message.id)).join("");
 
   if (isActive) {
     return rendered + `<div class="event"><span class="event-type">streaming...</span></div>`;
@@ -144,7 +152,7 @@ function renderEvents(message: MessageRow, events: MessageEventRow[]): string {
   return rendered;
 }
 
-function renderEvent(e: MessageEventRow): string {
+function renderEvent(e: MessageEventRow, messageId: string): string {
   const data = JSON.parse(e.data);
 
   // Assistant message
@@ -166,17 +174,13 @@ function renderEvent(e: MessageEventRow): string {
 
   // Permission request
   if (e.event_type === "permission_request") {
-    const status = Messages.getPermissionStatus(data.id);
-    const inner = (status && status !== "pending")
-      ? `<div class="perm-resolved">${status === "allowed" ? "Allowed" : "Denied"}</div>`
-      : `<div class="perm-actions">
-          <button class="btn btn-sm" style="background:var(--green);color:#000;border:none;"
-                  hx-post="/views/permissions/${data.id}/resolve" hx-vals='{"allow":"true"}'
-                  hx-target="closest .event-permission" hx-swap="outerHTML">Allow</button>
-          <button class="btn btn-sm" style="background:var(--red);color:#fff;border:none;"
-                  hx-post="/views/permissions/${data.id}/resolve" hx-vals='{"allow":"false"}'
-                  hx-target="closest .event-permission" hx-swap="outerHTML">Deny</button>
-        </div>`;
+    const permRow = Messages.getPermission(data.id as string);
+    const inner = (permRow && permRow.status !== "pending")
+      ? renderResolvedPermission(permRow)
+      : renderPermissionActions(data, messageId);
+    if (permRow && permRow.status !== "pending") {
+      return `<div class="event">${inner}</div>`;
+    }
     return `<div class="event"><div class="event-permission" id="perm-${data.id}">
       <div class="perm-title">${esc(data.title || data.tool_name)}</div>
       ${data.description ? `<div class="perm-desc">${esc(data.description)}</div>` : ""}
@@ -491,6 +495,56 @@ function renderSettingsPanel(settings: import("../types.js").SettingsRow): strin
   </div>`;
 }
 
+function renderPermissionActions(data: Record<string, unknown>, messageId: string): string {
+  const permId = data.id as string;
+  const toolName = data.tool_name as string;
+  const input = data.input as Record<string, unknown> | undefined;
+
+  // Build pattern suggestions
+  const suggestions: { label: string; pattern: string }[] = [];
+
+  if (toolName === "Bash" && input?.command) {
+    const cmd = String(input.command);
+    const prefix = cmd.split(/\s+/).slice(0, 1)[0];
+    suggestions.push({ label: `Bash(${cmd})`, pattern: `Bash(${cmd})` });
+    if (prefix && prefix !== cmd) {
+      suggestions.push({ label: `Bash(${prefix} *)`, pattern: `Bash(${prefix} *)` });
+    }
+    suggestions.push({ label: "Bash(*)", pattern: "Bash(*)" });
+  } else {
+    suggestions.push({ label: toolName, pattern: toolName });
+  }
+
+  const suggestBtns = suggestions.map(s =>
+    `<button class="btn btn-sm" style="background:rgba(88,166,255,0.15);color:var(--accent);border:1px solid rgba(88,166,255,0.3);font-family:var(--mono);font-size:11px;"
+            onclick="this.closest('.perm-allow-rule').querySelector('input[type=text]').value='${esc(s.pattern).replace(/'/g, "\\'")}';">${esc(s.label)}</button>`
+  ).join("");
+
+  const target = `#msg-${messageId}`;
+
+  return `<div class="perm-actions">
+    <button class="btn btn-sm" style="background:var(--green);color:#000;border:none;"
+            hx-post="/views/permissions/${permId}/resolve" hx-vals='{"allow":"true"}'
+            hx-target="${target}" hx-swap="outerHTML">Allow</button>
+    <button class="btn btn-sm" style="background:var(--red);color:#fff;border:none;"
+            hx-post="/views/permissions/${permId}/resolve" hx-vals='{"allow":"false"}'
+            hx-target="${target}" hx-swap="outerHTML">Deny</button>
+  </div>
+  <div class="perm-allow-rule" style="margin-top:8px;padding:8px;background:rgba(88,166,255,0.04);border:1px solid rgba(88,166,255,0.1);border-radius:6px;">
+    <div style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Allow rule</div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">${suggestBtns}</div>
+    <input type="text" value="${esc(suggestions[0].pattern)}" placeholder="Pattern..."
+           style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;font-family:var(--mono);margin-bottom:6px;">
+    <div style="display:flex;flex-direction:column;gap:4px;font-size:11px;margin-bottom:6px">
+      <label><input type="checkbox" name="session" checked style="accent-color:var(--accent);margin-right:4px;"> Session</label>
+      <label><input type="checkbox" name="workspace" style="accent-color:var(--accent);margin-right:4px;"> Workspace</label>
+      <label><input type="checkbox" name="global" style="accent-color:var(--accent);margin-right:4px;"> Global</label>
+    </div>
+    <button class="btn btn-sm btn-primary"
+            onclick="(function(el){var r=el.closest('.perm-allow-rule');var p=r.querySelector('input[type=text]').value;var s=r.querySelector('input[name=session]').checked;var w=r.querySelector('input[name=workspace]').checked;var g=r.querySelector('input[name=global]').checked;htmx.ajax('POST','/views/permissions/${permId}/always-allow',{target:document.getElementById('msg-${messageId}'),swap:'outerHTML',values:{pattern:p,session:s,workspace:w,global:g}});})(this)">Allow &amp; Add Rule</button>
+  </div>`;
+}
+
 function resolvePermissionView(ctx: RouteContext) {
   const { id } = ctx.params;
   const body = ctx.body as Record<string, string> | undefined;
@@ -498,20 +552,92 @@ function resolvePermissionView(ctx: RouteContext) {
   const row = Messages.getPermission(id);
   if (!row) return { status: 404, html: "" };
 
-  if (row.status !== "pending") {
-    return { status: 200, html: renderResolvedPermission(row) };
+  if (row.status === "pending") {
+    const allow = body?.allow === "true";
+    Messages.resolvePermission(id, allow);
   }
 
-  const allow = body?.allow === "true";
-  const updated = Messages.resolvePermission(id, allow);
-  return { status: 200, html: renderResolvedPermission(updated) };
+  // Return full message group so polling resumes
+  return { status: 200, html: renderFullMessageGroup(row.message_id) };
+}
+
+function alwaysAllowView(ctx: RouteContext) {
+  const { id } = ctx.params;
+  const body = ctx.body as Record<string, string> | undefined;
+  const pattern = body?.pattern?.trim();
+
+  if (!pattern) return { status: 400, html: "" };
+
+  const row = Messages.getPermission(id);
+  if (!row) return { status: 404, html: "" };
+
+  const message = Messages.getMessage(row.message_id);
+  if (!message) return { status: 404, html: "" };
+
+  const session = Sessions.getSession(message.session_id);
+  if (!session) return { status: 404, html: "" };
+
+  const scopes: string[] = [];
+
+  // Add to session
+  if (body?.session === "true") {
+    const existing: string[] = session.allowed_tools ? JSON.parse(session.allowed_tools) : [];
+    if (!existing.includes(pattern)) {
+      existing.push(pattern);
+      Sessions.updateSession(session.id, { allowedTools: existing });
+    }
+    scopes.push("session");
+  }
+
+  // Add to workspace
+  if (body?.workspace === "true") {
+    const workspace = Workspaces.getWorkspace(session.workspace_id);
+    if (workspace) {
+      const existing: string[] = workspace.allowed_tools ? JSON.parse(workspace.allowed_tools) : [];
+      if (!existing.includes(pattern)) {
+        existing.push(pattern);
+        Workspaces.updateWorkspace(workspace.id, { allowedTools: existing });
+      }
+    }
+    scopes.push("workspace");
+  }
+
+  // Add to global
+  if (body?.global === "true") {
+    const settings = Settings.getSettings();
+    const existing: string[] = settings.allowed_tools ? JSON.parse(settings.allowed_tools) : [];
+    if (!existing.includes(pattern)) {
+      existing.push(pattern);
+      Settings.updateSettings({ allowedTools: existing });
+    }
+    scopes.push("global");
+  }
+
+  // Resolve the permission as allowed with rule info
+  const scopeLabel = scopes.length > 0 ? scopes.join(", ") : "once";
+  if (row.status === "pending") {
+    Messages.resolvePermission(id, true, { rulePattern: pattern, ruleScope: scopeLabel });
+  }
+
+  // Return full message group so polling resumes
+  return { status: 200, html: renderFullMessageGroup(row.message_id) };
+}
+
+function renderFullMessageGroup(messageId: string): string {
+  const message = Messages.getMessage(messageId);
+  if (!message) return "";
+  const events = Messages.getAllMessageEvents(messageId);
+  return renderMessageGroup(message, events);
 }
 
 function renderResolvedPermission(row: PermissionRequestRow): string {
   const status = row.status === "allowed" ? "Allowed" : "Denied";
+  const extra = row.rule_pattern
+    ? ` <span style="font-family:var(--mono);font-size:10px;color:var(--accent)">(rule: ${esc(row.rule_pattern)} \u2192 ${esc(row.rule_scope || "session")})</span>`
+    : "";
   return `<div class="event-permission" id="perm-${row.id}">
     <div class="perm-title">${esc(row.title || row.tool_name)}</div>
     ${row.description ? `<div class="perm-desc">${esc(row.description)}</div>` : ""}
-    <div class="perm-resolved">${status}</div>
+    <div class="perm-resolved">${status}${extra}</div>
   </div>`;
 }
