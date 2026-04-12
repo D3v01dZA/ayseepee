@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import { Router, type RouteContext } from "../router.js";
 import { getDb } from "../db.js";
 import { runQuery, interruptQuery } from "../agent.js";
+import type {
+  SessionRow, WorkspaceRow, MessageRow, MessageEventRow, PermissionRequestRow,
+  CreateSessionBody, UpdateSessionBody, SendMessageBody, ResolvePermissionBody,
+  SessionResponse, MessageResponse, MessageEventResponse,
+} from "../types.js";
 
 export function registerSessionRoutes(router: Router): void {
 
@@ -26,59 +31,59 @@ function createSession(ctx: RouteContext) {
   const db = getDb();
   const { workspaceId } = ctx.params;
 
-  const workspace = db.prepare("SELECT * FROM workspaces WHERE id = ?").get(workspaceId);
+  const workspace = db.prepare("SELECT * FROM workspaces WHERE id = ?").get(workspaceId) as WorkspaceRow | undefined;
   if (!workspace) return { status: 404, body: { error: "Workspace not found" } };
 
-  const body = (ctx.body as { name?: string; model?: string; permissionMode?: string } | undefined) ?? {};
+  const body = (ctx.body as CreateSessionBody | undefined) ?? {};
   const id = randomUUID();
 
   db.prepare(
     "INSERT INTO sessions (id, workspace_id, name, model, permission_mode) VALUES (?, ?, ?, ?, ?)"
   ).run(id, workspaceId, body.name ?? null, body.model ?? null, body.permissionMode ?? null);
 
-  return { status: 201, body: rowToSession(db.prepare("SELECT * FROM sessions WHERE id = ?").get(id)) };
+  return { status: 201, body: rowToSession(db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow) };
 }
 
 function listSessions(ctx: RouteContext) {
   const db = getDb();
   const { workspaceId } = ctx.params;
 
-  const workspace = db.prepare("SELECT * FROM workspaces WHERE id = ?").get(workspaceId);
+  const workspace = db.prepare("SELECT * FROM workspaces WHERE id = ?").get(workspaceId) as WorkspaceRow | undefined;
   if (!workspace) return { status: 404, body: { error: "Workspace not found" } };
 
   const rows = db
     .prepare("SELECT * FROM sessions WHERE workspace_id = ? ORDER BY last_active_at DESC")
-    .all(workspaceId);
+    .all(workspaceId) as SessionRow[];
   return { status: 200, body: rows.map(rowToSession) };
 }
 
 function getSession(ctx: RouteContext) {
   const db = getDb();
-  const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(ctx.params.id);
+  const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(ctx.params.id) as SessionRow | undefined;
   if (!row) return { status: 404, body: { error: "Session not found" } };
   return { status: 200, body: rowToSession(row) };
 }
 
 function updateSession(ctx: RouteContext) {
   const db = getDb();
-  const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(ctx.params.id);
+  const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(ctx.params.id) as SessionRow | undefined;
   if (!row) return { status: 404, body: { error: "Session not found" } };
 
-  const body = ctx.body as Record<string, unknown> | undefined;
+  const body = ctx.body as UpdateSessionBody | undefined;
   if (!body) return { status: 400, body: { error: "Request body required" } };
 
   const fields: string[] = [];
   const values: unknown[] = [];
 
-  if ("name" in body) {
+  if (body.name !== undefined) {
     fields.push("name = ?");
     values.push(body.name ?? null);
   }
-  if ("model" in body) {
+  if (body.model !== undefined) {
     fields.push("model = ?");
     values.push(body.model || null);
   }
-  if ("permissionMode" in body) {
+  if (body.permissionMode !== undefined) {
     fields.push("permission_mode = ?");
     values.push(body.permissionMode || null);
   }
@@ -90,21 +95,19 @@ function updateSession(ctx: RouteContext) {
   values.push(ctx.params.id);
   db.prepare(`UPDATE sessions SET ${fields.join(", ")} WHERE id = ?`).run(...values);
 
-  const updated = db.prepare("SELECT * FROM sessions WHERE id = ?").get(ctx.params.id);
+  const updated = db.prepare("SELECT * FROM sessions WHERE id = ?").get(ctx.params.id) as SessionRow;
   return { status: 200, body: rowToSession(updated) };
 }
 
 function deleteSession(ctx: RouteContext) {
   const db = getDb();
-  const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(ctx.params.id) as
-    | Record<string, unknown>
-    | undefined;
+  const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(ctx.params.id) as SessionRow | undefined;
   if (!row) return { status: 404, body: { error: "Session not found" } };
 
   // Interrupt any active messages
   const activeMessages = db
     .prepare("SELECT id FROM messages WHERE session_id = ? AND status IN ('pending', 'streaming')")
-    .all(ctx.params.id) as { id: string }[];
+    .all(ctx.params.id) as Pick<MessageRow, "id">[];
   for (const msg of activeMessages) {
     interruptQuery(msg.id);
   }
@@ -121,31 +124,19 @@ function listMessages(ctx: RouteContext) {
   const db = getDb();
   const { id: sessionId } = ctx.params;
 
-  const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId);
+  const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId) as SessionRow | undefined;
   if (!session) return { status: 404, body: { error: "Session not found" } };
 
   const rows = db
     .prepare("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC")
-    .all(sessionId) as Record<string, unknown>[];
+    .all(sessionId) as MessageRow[];
 
-  const messages = rows.map((m) => {
+  const messages: MessageResponse[] = rows.map((m) => {
     const events = db
       .prepare("SELECT id, event_type, data, created_at FROM message_events WHERE message_id = ? ORDER BY id")
-      .all(m.id as string) as { id: number; event_type: string; data: string; created_at: string }[];
+      .all(m.id) as MessageEventRow[];
 
-    return {
-      id: m.id,
-      sessionId: m.session_id,
-      prompt: m.prompt,
-      status: m.status,
-      result: m.result,
-      error: m.error,
-      costUsd: m.cost_usd,
-      durationMs: m.duration_ms,
-      createdAt: m.created_at,
-      completedAt: m.completed_at,
-      events: events.map((e) => parseEvent(db, e)),
-    };
+    return rowToMessage(m, events.map((e) => parseEvent(db, e)));
   });
 
   return { status: 200, body: messages };
@@ -155,28 +146,20 @@ function sendMessage(ctx: RouteContext) {
   const db = getDb();
   const { id: sessionId } = ctx.params;
 
-  const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId) as
-    | Record<string, unknown>
-    | undefined;
+  const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId) as SessionRow | undefined;
   if (!session) return { status: 404, body: { error: "Session not found" } };
 
   if (session.status === "active") {
     return { status: 409, body: { error: "Session has an active query. Interrupt it first or wait." } };
   }
 
-  const body = ctx.body as {
-    prompt?: string;
-    model?: string;
-    maxTurns?: number;
-    maxBudgetUsd?: number;
-  };
+  const body = ctx.body as Partial<SendMessageBody> | undefined;
   if (!body?.prompt) {
     return { status: 400, body: { error: "prompt is required" } };
   }
 
-  const workspace = db.prepare("SELECT * FROM workspaces WHERE id = ?").get(session.workspace_id as string) as
-    | Record<string, unknown>
-    | undefined;
+  const workspace = db.prepare("SELECT * FROM workspaces WHERE id = ?").get(session.workspace_id) as
+    WorkspaceRow | undefined;
   if (!workspace) return { status: 500, body: { error: "Workspace not found for session" } };
 
   // Auto-name session from first prompt if unnamed
@@ -196,12 +179,12 @@ function sendMessage(ctx: RouteContext) {
     messageId,
     sessionId,
     prompt: body.prompt,
-    cwd: workspace.cwd as string,
-    agentSessionId: (session.agent_session_id as string) ?? null,
-    allowedTools: workspace.allowed_tools ? JSON.parse(workspace.allowed_tools as string) : null,
-    systemPrompt: (workspace.system_prompt as string) ?? null,
-    permissionMode: (session.permission_mode as string) || (workspace.permission_mode as string) || "default",
-    model: (body.model ?? session.model ?? null) as string | null,
+    cwd: workspace.cwd,
+    agentSessionId: session.agent_session_id,
+    allowedTools: workspace.allowed_tools ? JSON.parse(workspace.allowed_tools) : null,
+    systemPrompt: workspace.system_prompt,
+    permissionMode: session.permission_mode || workspace.permission_mode || "default",
+    model: body.model ?? session.model ?? null,
     maxTurns: body.maxTurns ?? null,
     maxBudgetUsd: body.maxBudgetUsd ?? null,
   });
@@ -217,30 +200,16 @@ function getMessage(ctx: RouteContext) {
   const { id: messageId } = ctx.params;
   const afterId = ctx.query.after ? parseInt(ctx.query.after, 10) : 0;
 
-  const message = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as
-    | Record<string, unknown>
-    | undefined;
+  const message = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as MessageRow | undefined;
   if (!message) return { status: 404, body: { error: "Message not found" } };
 
   const events = db
     .prepare("SELECT id, event_type, data, created_at FROM message_events WHERE message_id = ? AND id > ? ORDER BY id")
-    .all(messageId, afterId) as { id: number; event_type: string; data: string; created_at: string }[];
+    .all(messageId, afterId) as MessageEventRow[];
 
   return {
     status: 200,
-    body: {
-      id: message.id,
-      sessionId: message.session_id,
-      prompt: message.prompt,
-      status: message.status,
-      result: message.result,
-      error: message.error,
-      costUsd: message.cost_usd,
-      durationMs: message.duration_ms,
-      createdAt: message.created_at,
-      completedAt: message.completed_at,
-      events: events.map((e) => parseEvent(db, e)),
-    },
+    body: rowToMessage(message, events.map((e) => parseEvent(db, e))),
   };
 }
 
@@ -248,9 +217,7 @@ function interruptMessage(ctx: RouteContext) {
   const db = getDb();
   const { id: messageId } = ctx.params;
 
-  const message = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as
-    | Record<string, unknown>
-    | undefined;
+  const message = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as MessageRow | undefined;
   if (!message) return { status: 404, body: { error: "Message not found" } };
 
   if (message.status !== "streaming" && message.status !== "pending") {
@@ -263,7 +230,7 @@ function interruptMessage(ctx: RouteContext) {
       messageId
     );
     db.prepare("UPDATE sessions SET status = 'idle', last_active_at = datetime('now') WHERE id = ?").run(
-      message.session_id as string
+      message.session_id
     );
   }
 
@@ -274,13 +241,11 @@ function resolvePermission(ctx: RouteContext) {
   const db = getDb();
   const { id } = ctx.params;
 
-  const row = db.prepare("SELECT * FROM permission_requests WHERE id = ?").get(id) as
-    | Record<string, unknown>
-    | undefined;
+  const row = db.prepare("SELECT * FROM permission_requests WHERE id = ?").get(id) as PermissionRequestRow | undefined;
   if (!row) return { status: 404, body: { error: "Permission request not found" } };
   if (row.status !== "pending") return { status: 409, body: { error: "Already resolved" } };
 
-  const body = ctx.body as { allow: boolean; message?: string } | undefined;
+  const body = ctx.body as ResolvePermissionBody | undefined;
   if (!body || typeof body.allow !== "boolean") {
     return { status: 400, body: { error: "allow (boolean) is required" } };
   }
@@ -292,28 +257,42 @@ function resolvePermission(ctx: RouteContext) {
   return { status: 200, body: { id, status: body.allow ? "allowed" : "denied" } };
 }
 
-function parseEvent(db: ReturnType<typeof getDb>, e: { id: number; event_type: string; data: string; created_at: string }) {
+function parseEvent(db: ReturnType<typeof getDb>, e: MessageEventRow): MessageEventResponse {
   const data = JSON.parse(e.data);
   if (e.event_type === "permission_request" && data.id) {
     const perm = db.prepare("SELECT status FROM permission_requests WHERE id = ?").get(data.id) as
-      | { status: string }
-      | undefined;
+      Pick<PermissionRequestRow, "status"> | undefined;
     if (perm) data.resolved = perm.status;
   }
   return { id: e.id, type: e.event_type, data, createdAt: e.created_at };
 }
 
-function rowToSession(row: unknown): Record<string, unknown> {
-  const r = row as Record<string, unknown>;
+function rowToMessage(row: MessageRow, events: MessageEventResponse[]): MessageResponse {
   return {
-    id: r.id,
-    workspaceId: r.workspace_id,
-    name: r.name,
-    agentSessionId: r.agent_session_id,
-    model: r.model,
-    permissionMode: r.permission_mode,
-    status: r.status,
-    createdAt: r.created_at,
-    lastActiveAt: r.last_active_at,
+    id: row.id,
+    sessionId: row.session_id,
+    prompt: row.prompt,
+    status: row.status,
+    result: row.result,
+    error: row.error,
+    costUsd: row.cost_usd,
+    durationMs: row.duration_ms,
+    createdAt: row.created_at,
+    completedAt: row.completed_at,
+    events,
+  };
+}
+
+function rowToSession(row: SessionRow): SessionResponse {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    agentSessionId: row.agent_session_id,
+    model: row.model,
+    permissionMode: row.permission_mode,
+    status: row.status,
+    createdAt: row.created_at,
+    lastActiveAt: row.last_active_at,
   };
 }

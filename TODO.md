@@ -1,7 +1,7 @@
 # TODO
 
 ## Typing
-- [ ] Fix the types for controllers, strongly define what each input/output type looks like
+- [x] Fix the types for controllers, strongly define what each input/output type looks like
 
 ## Backend
 - [x] Replace sync fs methods (`readdirSync`, `statSync`, `realpathSync`, `readFileSync`, `existsSync`) with async equivalents
