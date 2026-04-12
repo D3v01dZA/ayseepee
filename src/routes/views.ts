@@ -40,7 +40,10 @@ function renderWorkspaceList(workspaces: WorkspaceRow[], activeId?: string, oob 
           hx-get="/views/workspaces/${w.id}/activate"
           hx-target="#session-list" hx-swap="outerHTML">
         <span>${esc(w.name)}</span>
-        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteWorkspace('${w.id}')">&times;</button>
+        <span style="display:flex;align-items:center;gap:4px">
+          <button class="btn btn-sm" onclick="event.stopPropagation();showEditWorkspace('${w.id}')" title="Edit workspace">&#9881;</button>
+          <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteWorkspace('${w.id}')">&times;</button>
+        </span>
       </li>`).join("");
   return `<ul id="workspace-list" class="sidebar-list"${oobAttr}${activeAttr}>${items}</ul>`;
 }
@@ -94,6 +97,7 @@ function renderSessionHeader(session: SessionRow, workspace: WorkspaceRow, oob =
         <option value="bypassPermissions"${session.permission_mode === "bypassPermissions" ? " selected" : ""}>Bypass Permissions</option>
         <option value="plan"${session.permission_mode === "plan" ? " selected" : ""}>Plan</option>
       </select>
+      <button class="btn btn-sm" onclick="showEditSession('${session.id}')" title="Edit allowed tools">Tools</button>
       <button class="btn btn-sm btn-danger" onclick="deleteSession('${session.id}')">Delete</button>
     </div>
   </div>`;

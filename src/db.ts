@@ -45,10 +45,13 @@ function runMigrations(db: Database.Database): void {
     if (version <= currentVersion) continue;
 
     const sql = readFileSync(join(migrationsDir, file), "utf-8");
+    const needsFkOff = sql.includes("PRAGMA foreign_keys = OFF");
+    if (needsFkOff) db.pragma("foreign_keys = OFF");
     db.transaction(() => {
       db.exec(sql);
       db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(version);
     })();
+    if (needsFkOff) db.pragma("foreign_keys = ON");
 
     console.log(`Applied migration ${file}`);
   }

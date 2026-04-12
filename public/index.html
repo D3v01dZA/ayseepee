@@ -188,9 +188,41 @@
       <option value="bypassPermissions">Bypass Permissions</option>
       <option value="plan">Plan</option>
     </select>
+    <label>Allowed Tools (optional, one per line, inherits from global)</label>
+    <textarea id="ws-tools" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical" placeholder="(inherit from global)"></textarea>
     <div class="actions">
       <button class="btn" onclick="hideDialog('dialog-workspace')">Cancel</button>
       <button class="btn btn-primary" onclick="createWorkspace()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Workspace Dialog -->
+<div class="dialog-overlay hidden" id="dialog-edit-workspace">
+  <div class="dialog">
+    <h3>Edit Workspace</h3>
+    <label>Name</label>
+    <input type="text" id="edit-ws-name">
+    <label>Model</label>
+    <select id="edit-ws-model">
+      <option value="">(inherit)</option>
+      <option value="sonnet">Sonnet</option>
+      <option value="opus">Opus</option>
+      <option value="haiku">Haiku</option>
+    </select>
+    <label>Permission Mode</label>
+    <select id="edit-ws-permission">
+      <option value="">(inherit)</option>
+      <option value="default">Default</option>
+      <option value="acceptEdits">Accept Edits</option>
+      <option value="bypassPermissions">Bypass Permissions</option>
+      <option value="plan">Plan</option>
+    </select>
+    <label>Allowed Tools (one per line)</label>
+    <textarea id="edit-ws-tools" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical" placeholder="(inherit from global)"></textarea>
+    <div class="actions">
+      <button class="btn" onclick="hideDialog('dialog-edit-workspace')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveWorkspace()">Save</button>
     </div>
   </div>
 </div>
@@ -210,15 +242,34 @@
     </select>
     <label>Permission Mode (optional, inherits from workspace/global)</label>
     <select id="sess-permission">
-      <option value="">(inherit from workspace)</option>
+      <option value="">(inherit)</option>
       <option value="default">Default</option>
       <option value="acceptEdits">Accept Edits</option>
       <option value="bypassPermissions">Bypass Permissions</option>
       <option value="plan">Plan</option>
     </select>
+    <label>Allowed Tools (optional, one per line, inherits from workspace/global)</label>
+    <textarea id="sess-tools" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical" placeholder="(inherit from workspace/global)"></textarea>
     <div class="actions">
       <button class="btn" onclick="hideDialog('dialog-session')">Cancel</button>
       <button class="btn btn-primary" onclick="createSession()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Session Dialog -->
+<div class="dialog-overlay hidden" id="dialog-edit-session">
+  <div class="dialog">
+    <h3>Edit Session</h3>
+    <label>Allowed Tools (one per line)</label>
+    <textarea id="edit-sess-tools" rows="6" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical" placeholder="(inherit from workspace/global)"></textarea>
+    <div style="font-size:11px;color:var(--text-dim);margin-top:4px">
+      Tool names: Read, Edit, Write, Glob, Grep, Bash<br>
+      Bash patterns: Bash(git *), Bash(npm *), Bash(*)
+    </div>
+    <div class="actions">
+      <button class="btn" onclick="hideDialog('dialog-edit-session')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSessionTools()">Save</button>
     </div>
   </div>
 </div>
@@ -316,6 +367,7 @@ async function showCreateWorkspace() {
   document.getElementById('ws-name').value = '';
   document.getElementById('ws-model').value = '';
   document.getElementById('ws-permission').value = '';
+  document.getElementById('ws-tools').value = '';
   pickerCwd = '/';
   pickerOpen.clear();
   showDialog('dialog-workspace');
@@ -324,6 +376,9 @@ async function showCreateWorkspace() {
     const s = await api('GET', '/settings');
     document.querySelector('#ws-model option[value=""]').textContent = '(inherit: ' + modelLabel(s.model) + ')';
     document.querySelector('#ws-permission option[value=""]').textContent = '(inherit: ' + permLabel(s.permissionMode) + ')';
+    document.getElementById('ws-tools').placeholder = s.allowedTools?.length
+      ? '(inherit: ' + s.allowedTools.join(', ') + ')'
+      : '(no restrictions)';
   } catch {}
 }
 
@@ -396,10 +451,12 @@ async function createWorkspace() {
   const cwd = pickerCwd;
   const model = document.getElementById('ws-model').value;
   const permissionMode = document.getElementById('ws-permission').value;
+  const tools = parseTools(document.getElementById('ws-tools').value);
   if (!name || !cwd || cwd === '/') { showError('Select a directory and enter a name'); return; }
   const body = { name, cwd };
   if (model) body.model = model;
   if (permissionMode) body.permissionMode = permissionMode;
+  if (tools) body.allowedTools = tools;
   const ws = await api('POST', '/workspaces', body);
   hideDialog('dialog-workspace');
   htmx.ajax('GET', '/views/workspaces/' + ws.id + '/activate', { target: '#session-list', swap: 'outerHTML' });
@@ -425,6 +482,7 @@ async function showCreateSession() {
   document.getElementById('sess-name').value = '';
   document.getElementById('sess-model').value = '';
   document.getElementById('sess-permission').value = '';
+  document.getElementById('sess-tools').value = '';
   showDialog('dialog-session');
   try {
     const [s, ws] = await Promise.all([
@@ -433,8 +491,12 @@ async function showCreateSession() {
     ]);
     const inheritModel = modelLabel(ws.model || s.model);
     const inheritPerm = permLabel(ws.permissionMode || s.permissionMode);
+    const inheritTools = ws.allowedTools || s.allowedTools;
     document.querySelector('#sess-model option[value=""]').textContent = '(inherit: ' + inheritModel + ')';
     document.querySelector('#sess-permission option[value=""]').textContent = '(inherit: ' + inheritPerm + ')';
+    document.getElementById('sess-tools').placeholder = inheritTools?.length
+      ? '(inherit: ' + inheritTools.join(', ') + ')'
+      : '(no restrictions)';
   } catch {}
 }
 
@@ -442,10 +504,12 @@ async function createSession() {
   const name = document.getElementById('sess-name').value.trim();
   const model = document.getElementById('sess-model').value;
   const permissionMode = document.getElementById('sess-permission').value;
+  const tools = parseTools(document.getElementById('sess-tools').value);
   const body = {};
   if (name) body.name = name;
   if (model) body.model = model;
   if (permissionMode) body.permissionMode = permissionMode;
+  if (tools) body.allowedTools = tools;
   const s = await api('POST', '/workspaces/' + activeWorkspaceId + '/sessions', body);
   hideDialog('dialog-session');
   htmx.ajax('GET', '/views/sessions/' + s.id + '/activate', { target: '#main-panel', swap: 'innerHTML' });
@@ -465,6 +529,74 @@ async function renameSession(sid) {
   if (name === null || !name.trim()) return;
   await api('PATCH', '/sessions/' + sid, { name: name.trim() });
   htmx.ajax('GET', '/views/sessions/' + sid + '/activate', { target: '#main-panel', swap: 'innerHTML' });
+}
+
+// --- Edit workspace ---
+let editingWorkspaceId = null;
+async function showEditWorkspace(id) {
+  editingWorkspaceId = id;
+  const [ws, s] = await Promise.all([
+    api('GET', '/workspaces/' + id),
+    api('GET', '/settings'),
+  ]);
+  document.getElementById('edit-ws-name').value = ws.name || '';
+  document.getElementById('edit-ws-model').value = ws.model || '';
+  document.getElementById('edit-ws-permission').value = ws.permissionMode || '';
+  document.getElementById('edit-ws-tools').value = ws.allowedTools ? ws.allowedTools.join('\n') : '';
+  document.querySelector('#edit-ws-model option[value=""]').textContent = '(inherit: ' + modelLabel(s.model) + ')';
+  document.querySelector('#edit-ws-permission option[value=""]').textContent = '(inherit: ' + permLabel(s.permissionMode) + ')';
+  document.getElementById('edit-ws-tools').placeholder = s.allowedTools?.length
+    ? '(inherit: ' + s.allowedTools.join(', ') + ')'
+    : '(no restrictions)';
+  showDialog('dialog-edit-workspace');
+}
+
+async function saveWorkspace() {
+  const name = document.getElementById('edit-ws-name').value.trim();
+  const model = document.getElementById('edit-ws-model').value;
+  const permissionMode = document.getElementById('edit-ws-permission').value;
+  const tools = parseTools(document.getElementById('edit-ws-tools').value);
+  if (!name) { showError('Name is required'); return; }
+  const body = { name };
+  body.model = model || null;
+  body.permissionMode = permissionMode || null;
+  body.allowedTools = tools || null;
+  await api('PATCH', '/workspaces/' + editingWorkspaceId, body);
+  hideDialog('dialog-edit-workspace');
+  htmx.ajax('GET', '/views/workspaces', { target: '#workspace-list', swap: 'outerHTML' });
+  // Refresh session header if viewing this workspace (settings may have changed)
+  if (activeWorkspaceId === editingWorkspaceId) {
+    htmx.ajax('GET', '/views/workspaces/' + editingWorkspaceId + '/activate', { target: '#session-list', swap: 'outerHTML' });
+  }
+}
+
+// --- Edit session tools ---
+let editingSessionId = null;
+async function showEditSession(sid) {
+  editingSessionId = sid;
+  const [sess, ws, s] = await Promise.all([
+    api('GET', '/sessions/' + sid),
+    api('GET', '/workspaces/' + activeWorkspaceId),
+    api('GET', '/settings'),
+  ]);
+  document.getElementById('edit-sess-tools').value = sess.allowedTools ? sess.allowedTools.join('\n') : '';
+  const inheritTools = ws.allowedTools || s.allowedTools;
+  document.getElementById('edit-sess-tools').placeholder = inheritTools?.length
+    ? '(inherit: ' + inheritTools.join(', ') + ')'
+    : '(no restrictions)';
+  showDialog('dialog-edit-session');
+}
+
+async function saveSessionTools() {
+  const tools = parseTools(document.getElementById('edit-sess-tools').value);
+  await api('PATCH', '/sessions/' + editingSessionId, { allowedTools: tools || null });
+  hideDialog('dialog-edit-session');
+  htmx.ajax('GET', '/views/sessions/' + editingSessionId + '/activate', { target: '#main-panel', swap: 'innerHTML' });
+}
+
+function parseTools(text) {
+  const lines = text.trim().split('\n').map(s => s.trim()).filter(Boolean);
+  return lines.length ? lines : null;
 }
 
 // --- UI helpers ---

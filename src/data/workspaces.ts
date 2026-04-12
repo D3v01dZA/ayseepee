@@ -29,7 +29,7 @@ export function createWorkspace(params: {
     params.cwd,
     params.allowedTools ? JSON.stringify(params.allowedTools) : null,
     params.systemPrompt ?? null,
-    params.permissionMode ?? "default",
+    params.permissionMode ?? null,
     params.model ?? null,
   );
   return db.prepare("SELECT * FROM workspaces WHERE id = ?").get(id) as WorkspaceRow;
@@ -54,7 +54,7 @@ export function updateWorkspace(id: string, fields: {
     values.push(fields.allowedTools ? JSON.stringify(fields.allowedTools) : null);
   }
   if (fields.systemPrompt !== undefined) { sets.push("system_prompt = ?"); values.push(fields.systemPrompt ?? null); }
-  if (fields.permissionMode !== undefined) { sets.push("permission_mode = ?"); values.push(fields.permissionMode || "default"); }
+  if (fields.permissionMode !== undefined) { sets.push("permission_mode = ?"); values.push(fields.permissionMode || null); }
   if (fields.model !== undefined) { sets.push("model = ?"); values.push(fields.model || null); }
 
   values.push(id);

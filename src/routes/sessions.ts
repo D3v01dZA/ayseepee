@@ -39,6 +39,7 @@ function createSession(ctx: RouteContext) {
     name: body.name,
     model: body.model,
     permissionMode: body.permissionMode,
+    allowedTools: body.allowedTools,
   });
 
   return { status: 201, body: rowToSession(row) };
@@ -65,13 +66,14 @@ function updateSession(ctx: RouteContext) {
   const body = ctx.body as UpdateSessionBody | undefined;
   if (!body) return { status: 400, body: { error: "Request body required" } };
 
-  const hasFields = body.name !== undefined || body.model !== undefined || body.permissionMode !== undefined;
+  const hasFields = body.name !== undefined || body.model !== undefined || body.permissionMode !== undefined || body.allowedTools !== undefined;
   if (!hasFields) return { status: 400, body: { error: "No fields to update" } };
 
   const updated = Sessions.updateSession(ctx.params.id, {
     name: body.name,
     model: body.model,
     permissionMode: body.permissionMode,
+    allowedTools: body.allowedTools,
   });
 
   return { status: 200, body: rowToSession(updated) };
