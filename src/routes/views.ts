@@ -49,7 +49,10 @@ function renderSessionList(sessions: SessionRow[], activeId?: string, oob = fals
           hx-get="/views/sessions/${s.id}/activate"
           hx-target="#main-panel" hx-swap="innerHTML">
         <span>${esc(s.name || s.id.slice(0, 8))}</span>
-        <span class="status status-${s.status}">${s.status}</span>
+        <span style="display:flex;align-items:center;gap:4px">
+          <span class="status status-${s.status}">${s.status}</span>
+          <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteSession('${s.id}')">&times;</button>
+        </span>
       </li>`).join("");
   return `<ul id="session-list" class="sidebar-list"${oobAttr}>${items}</ul>`;
 }
@@ -91,7 +94,7 @@ function renderInputBar(sessionId: string): string {
   return `<form class="input-bar" id="input-bar"
       hx-post="/views/sessions/${sessionId}/messages"
       hx-target="#messages-feed" hx-swap="beforeend"
-      hx-on::after-request="if(event.detail.successful){this.querySelector('input[name=prompt]').value='';var f=document.getElementById('messages-feed');if(f)f.scrollTop=f.scrollHeight;}">
+      hx-on::after-request="if(event.detail.successful){this.querySelector('input[name=prompt]').value='';var e=document.getElementById('empty-messages');if(e)e.remove();var f=document.getElementById('messages-feed');if(f)f.scrollTop=f.scrollHeight;}">
     <input type="text" name="prompt" placeholder="Send a message..." autocomplete="off">
     <button type="submit" class="btn btn-primary">Send</button>
   </form>`;
@@ -122,8 +125,8 @@ function renderEvents(message: MessageRow, events: MessageEventRow[]): string {
 
   const rendered = events.map(e => renderEvent(e)).join("");
 
-  if (isActive && !rendered.trim()) {
-    return rendered + `<div class="event"><span class="event-type">waiting...</span></div>`;
+  if (isActive) {
+    return rendered + `<div class="event"><span class="event-type">streaming...</span></div>`;
   }
   return rendered;
 }
@@ -273,7 +276,7 @@ function activateSessionView(ctx: RouteContext) {
   }).join("");
 
   const emptyMsg = messages.length === 0
-    ? `<div style="color:var(--text-dim);text-align:center;margin-top:40px;font-size:13px">No messages yet. Send a prompt to begin.</div>`
+    ? `<div id="empty-messages" style="color:var(--text-dim);text-align:center;margin-top:40px;font-size:13px">No messages yet. Send a prompt to begin.</div>`
     : "";
 
   return {

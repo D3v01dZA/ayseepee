@@ -365,7 +365,6 @@ async function createWorkspace() {
 async function deleteWorkspace(id) {
   if (!confirm('Delete this workspace?')) return;
   try { await api('DELETE', '/workspaces/' + id); } catch { return; }
-  htmx.trigger('#workspace-list', 'refresh');
   if (activeWorkspaceId === id) {
     activeWorkspaceId = null;
     document.getElementById('session-list').outerHTML = '<ul id="session-list" class="sidebar-list"></ul>';
@@ -373,6 +372,7 @@ async function deleteWorkspace(id) {
       '<div class="main-header"><h2>Select a session</h2></div>' +
       '<div class="main-empty">Create a workspace and session to get started</div>';
   }
+  htmx.ajax('GET', '/views/workspaces', { target: '#workspace-list', swap: 'outerHTML' });
 }
 
 // --- Session CRUD ---
