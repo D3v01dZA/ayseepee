@@ -17,12 +17,13 @@ export function createSession(workspaceId: string, params: {
   model?: string;
   permissionMode?: string;
   allowedTools?: string[];
+  allowedToolsMode?: "override" | "inherit";
 }): SessionRow {
   const db = getDb();
   const id = randomUUID();
   db.prepare(
-    "INSERT INTO sessions (id, workspace_id, name, model, permission_mode, allowed_tools) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(id, workspaceId, params.name ?? null, params.model ?? null, params.permissionMode ?? null, params.allowedTools ? JSON.stringify(params.allowedTools) : null);
+    "INSERT INTO sessions (id, workspace_id, name, model, permission_mode, allowed_tools, allowed_tools_mode) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(id, workspaceId, params.name ?? null, params.model ?? null, params.permissionMode ?? null, params.allowedTools ? JSON.stringify(params.allowedTools) : null, params.allowedToolsMode ?? "inherit");
   return db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow;
 }
 
@@ -31,6 +32,7 @@ export function updateSession(id: string, fields: {
   model?: string | null;
   permissionMode?: string | null;
   allowedTools?: string[] | null;
+  allowedToolsMode?: "override" | "inherit";
 }): SessionRow {
   const db = getDb();
   const sets: string[] = [];
@@ -43,6 +45,7 @@ export function updateSession(id: string, fields: {
     sets.push("allowed_tools = ?");
     values.push(fields.allowedTools ? JSON.stringify(fields.allowedTools) : null);
   }
+  if (fields.allowedToolsMode !== undefined) { sets.push("allowed_tools_mode = ?"); values.push(fields.allowedToolsMode); }
 
   if (sets.length > 0) {
     values.push(id);

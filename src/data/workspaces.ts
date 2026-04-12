@@ -14,6 +14,7 @@ export function createWorkspace(params: {
   name: string;
   cwd: string;
   allowedTools?: string[];
+  allowedToolsMode?: "override" | "inherit";
   systemPrompt?: string;
   permissionMode?: string;
   model?: string;
@@ -21,13 +22,14 @@ export function createWorkspace(params: {
   const db = getDb();
   const id = randomUUID();
   db.prepare(
-    `INSERT INTO workspaces (id, name, cwd, allowed_tools, system_prompt, permission_mode, model)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO workspaces (id, name, cwd, allowed_tools, allowed_tools_mode, system_prompt, permission_mode, model)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     params.name,
     params.cwd,
     params.allowedTools ? JSON.stringify(params.allowedTools) : null,
+    params.allowedToolsMode ?? "inherit",
     params.systemPrompt ?? null,
     params.permissionMode ?? null,
     params.model ?? null,
@@ -39,6 +41,7 @@ export function updateWorkspace(id: string, fields: {
   name?: string;
   cwd?: string;
   allowedTools?: string[] | null;
+  allowedToolsMode?: "override" | "inherit";
   systemPrompt?: string | null;
   permissionMode?: string;
   model?: string | null;
@@ -53,6 +56,7 @@ export function updateWorkspace(id: string, fields: {
     sets.push("allowed_tools = ?");
     values.push(fields.allowedTools ? JSON.stringify(fields.allowedTools) : null);
   }
+  if (fields.allowedToolsMode !== undefined) { sets.push("allowed_tools_mode = ?"); values.push(fields.allowedToolsMode); }
   if (fields.systemPrompt !== undefined) { sets.push("system_prompt = ?"); values.push(fields.systemPrompt ?? null); }
   if (fields.permissionMode !== undefined) { sets.push("permission_mode = ?"); values.push(fields.permissionMode || null); }
   if (fields.model !== undefined) { sets.push("model = ?"); values.push(fields.model || null); }

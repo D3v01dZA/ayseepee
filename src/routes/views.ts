@@ -24,7 +24,6 @@ export function registerViewRoutes(router: Router): void {
   router.get("/views/sessions/:sid/activate", activateSessionView);
   router.get("/views/poll-message/:mid", pollMessageView);
   router.post("/views/sessions/:sid/messages", sendMessageView);
-  router.patch("/views/sessions/:sid", updateSessionView);
   router.post("/views/permissions/:id/resolve", resolvePermissionView);
 }
 
@@ -59,6 +58,7 @@ function renderSessionList(sessions: SessionRow[], activeId?: string, oob = fals
         <span>${esc(s.name || s.id.slice(0, 8))}</span>
         <span style="display:flex;align-items:center;gap:4px">
           <span class="status status-${s.status}">${s.status}</span>
+          <button class="btn btn-sm" onclick="event.stopPropagation();showEditSession('${s.id}')" title="Edit session">&#9881;</button>
           <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteSession('${s.id}')">&times;</button>
         </span>
       </li>`).join("");
@@ -68,38 +68,14 @@ function renderSessionList(sessions: SessionRow[], activeId?: string, oob = fals
 function renderSessionHeader(session: SessionRow, workspace: WorkspaceRow, oob = false): string {
   const oobAttr = oob ? ` hx-swap-oob="outerHTML"` : "";
   const settings = Settings.getSettings();
-  const modelVal = session.model || "";
-  const inheritedModel = shortModel(workspace.model || settings.model);
-  const inheritedPerm = permModeLabel(workspace.permission_mode || settings.permission_mode);
+  const resolved = Settings.resolveSettings(settings, workspace, session);
   return `<div class="main-header" id="session-header"${oobAttr}>
     <button class="hamburger" onclick="toggleSidebar()">&#9776;</button>
     <div>
       <h2 id="main-title" onclick="renameSession('${session.id}')" style="cursor:pointer" title="Click to rename">${esc(session.name || session.id.slice(0, 8))}</h2>
       <div class="meta">${esc(workspace.cwd)}</div>
     </div>
-    <div>
-      <select name="model" class="btn btn-sm"
-              hx-patch="/views/sessions/${session.id}"
-              hx-target="#session-header" hx-swap="outerHTML"
-              hx-include="this">
-        <option value=""${!modelVal ? " selected" : ""}>(inherit: ${esc(inheritedModel)})</option>
-        <option value="sonnet"${modelVal === "sonnet" ? " selected" : ""}>Sonnet</option>
-        <option value="opus"${modelVal === "opus" ? " selected" : ""}>Opus</option>
-        <option value="haiku"${modelVal === "haiku" ? " selected" : ""}>Haiku</option>
-      </select>
-      <select name="permissionMode" class="btn btn-sm"
-              hx-patch="/views/sessions/${session.id}"
-              hx-target="#session-header" hx-swap="outerHTML"
-              hx-include="this">
-        <option value=""${!session.permission_mode ? " selected" : ""}>(inherit: ${esc(inheritedPerm)})</option>
-        <option value="default"${session.permission_mode === "default" ? " selected" : ""}>Default</option>
-        <option value="acceptEdits"${session.permission_mode === "acceptEdits" ? " selected" : ""}>Accept Edits</option>
-        <option value="bypassPermissions"${session.permission_mode === "bypassPermissions" ? " selected" : ""}>Bypass Permissions</option>
-        <option value="plan"${session.permission_mode === "plan" ? " selected" : ""}>Plan</option>
-      </select>
-      <button class="btn btn-sm" onclick="showEditSession('${session.id}')" title="Edit allowed tools">Tools</button>
-      <button class="btn btn-sm btn-danger" onclick="deleteSession('${session.id}')">Delete</button>
-    </div>
+    <div class="meta">${esc(shortModel(resolved.model))} · ${esc(permModeLabel(resolved.permissionMode))}</div>
   </div>`;
 }
 
@@ -458,27 +434,6 @@ function sendMessageView(ctx: RouteContext) {
   }
 
   return { status: 200, html };
-}
-
-function updateSessionView(ctx: RouteContext) {
-  const { sid } = ctx.params;
-  const body = ctx.body as Record<string, string> | undefined;
-  if (!body) return { status: 400, html: "" };
-
-  const session = Sessions.getSession(sid);
-  if (!session) return { status: 404, html: "" };
-
-  const updated = Sessions.updateSession(sid, {
-    name: body.name,
-    model: body.model,
-    permissionMode: body.permissionMode,
-  });
-
-  const workspace = Workspaces.getWorkspace(updated.workspace_id)!;
-  return {
-    status: 200,
-    html: renderSessionHeader(updated, workspace) + renderSessionList(Sessions.listSessions(updated.workspace_id), sid, true),
-  };
 }
 
 function settingsView() {

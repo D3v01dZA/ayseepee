@@ -40,6 +40,7 @@ function createSession(ctx: RouteContext) {
     model: body.model,
     permissionMode: body.permissionMode,
     allowedTools: body.allowedTools,
+    allowedToolsMode: body.allowedToolsMode,
   });
 
   return { status: 201, body: rowToSession(row) };
@@ -66,7 +67,7 @@ function updateSession(ctx: RouteContext) {
   const body = ctx.body as UpdateSessionBody | undefined;
   if (!body) return { status: 400, body: { error: "Request body required" } };
 
-  const hasFields = body.name !== undefined || body.model !== undefined || body.permissionMode !== undefined || body.allowedTools !== undefined;
+  const hasFields = body.name !== undefined || body.model !== undefined || body.permissionMode !== undefined || body.allowedTools !== undefined || body.allowedToolsMode !== undefined;
   if (!hasFields) return { status: 400, body: { error: "No fields to update" } };
 
   const updated = Sessions.updateSession(ctx.params.id, {
@@ -74,6 +75,7 @@ function updateSession(ctx: RouteContext) {
     model: body.model,
     permissionMode: body.permissionMode,
     allowedTools: body.allowedTools,
+    allowedToolsMode: body.allowedToolsMode,
   });
 
   return { status: 200, body: rowToSession(updated) };
@@ -236,6 +238,7 @@ function rowToSession(row: SessionRow): SessionResponse {
     model: row.model,
     permissionMode: row.permission_mode,
     allowedTools: row.allowed_tools ? JSON.parse(row.allowed_tools) : null,
+    allowedToolsMode: row.allowed_tools_mode,
     status: row.status,
     createdAt: row.created_at,
     lastActiveAt: row.last_active_at,

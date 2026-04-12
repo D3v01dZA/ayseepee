@@ -29,6 +29,7 @@ async function createWorkspace(ctx: RouteContext) {
     name: body.name,
     cwd,
     allowedTools: body.allowedTools,
+    allowedToolsMode: body.allowedToolsMode,
     systemPrompt: body.systemPrompt,
     permissionMode: body.permissionMode,
     model: body.model,
@@ -67,6 +68,7 @@ async function updateWorkspace(ctx: RouteContext) {
     }
   }
   if (body.allowedTools !== undefined) { fields.allowedTools = body.allowedTools; hasFields = true; }
+  if (body.allowedToolsMode !== undefined) { fields.allowedToolsMode = body.allowedToolsMode; hasFields = true; }
   if (body.systemPrompt !== undefined) { fields.systemPrompt = body.systemPrompt; hasFields = true; }
   if (body.permissionMode !== undefined) { fields.permissionMode = body.permissionMode; hasFields = true; }
   if (body.model !== undefined) { fields.model = body.model; hasFields = true; }
@@ -95,6 +97,7 @@ function rowToWorkspace(row: WorkspaceRow): WorkspaceResponse {
     name: row.name,
     cwd: row.cwd,
     allowedTools: row.allowed_tools ? JSON.parse(row.allowed_tools) : null,
+    allowedToolsMode: row.allowed_tools_mode,
     systemPrompt: row.system_prompt,
     permissionMode: row.permission_mode,
     model: row.model,

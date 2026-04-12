@@ -37,8 +37,28 @@ export function resolveSettings(
   const model = session.model || workspace.model || settings.model;
   const permissionMode = session.permission_mode || workspace.permission_mode || settings.permission_mode;
 
-  const allowedToolsRaw = session.allowed_tools ?? workspace.allowed_tools ?? settings.allowed_tools;
-  const allowedTools = allowedToolsRaw ? JSON.parse(allowedToolsRaw) : null;
+  // Start with global tools
+  let allowedTools: string[] | null = settings.allowed_tools ? JSON.parse(settings.allowed_tools) : null;
+
+  // Apply workspace tools
+  if (workspace.allowed_tools) {
+    const wsTools: string[] = JSON.parse(workspace.allowed_tools);
+    if (workspace.allowed_tools_mode === "inherit" && allowedTools) {
+      allowedTools = [...new Set([...allowedTools, ...wsTools])];
+    } else {
+      allowedTools = wsTools;
+    }
+  }
+
+  // Apply session tools
+  if (session.allowed_tools) {
+    const sessTools: string[] = JSON.parse(session.allowed_tools);
+    if (session.allowed_tools_mode === "inherit" && allowedTools) {
+      allowedTools = [...new Set([...allowedTools, ...sessTools])];
+    } else {
+      allowedTools = sessTools;
+    }
+  }
 
   return { model, permissionMode, allowedTools };
 }

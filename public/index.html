@@ -188,8 +188,13 @@
       <option value="bypassPermissions">Bypass Permissions</option>
       <option value="plan">Plan</option>
     </select>
-    <label>Allowed Tools (optional, one per line, inherits from global)</label>
-    <textarea id="ws-tools" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical" placeholder="(inherit from global)"></textarea>
+    <label>Allowed Tools (optional, one per line)</label>
+    <select id="ws-tools-mode" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;margin-bottom:4px">
+      <option value="inherit">Inherit</option>
+      <option value="override">Override</option>
+    </select>
+    <textarea id="ws-tools" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical"></textarea>
+    <div id="ws-parent-tools" style="font-size:11px;color:var(--text-dim);margin-top:4px;font-family:var(--mono)"></div>
     <div class="actions">
       <button class="btn" onclick="hideDialog('dialog-workspace')">Cancel</button>
       <button class="btn btn-primary" onclick="createWorkspace()">Create</button>
@@ -219,7 +224,12 @@
       <option value="plan">Plan</option>
     </select>
     <label>Allowed Tools (one per line)</label>
-    <textarea id="edit-ws-tools" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical" placeholder="(inherit from global)"></textarea>
+    <select id="edit-ws-tools-mode" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;margin-bottom:4px">
+      <option value="inherit">Inherit</option>
+      <option value="override">Override</option>
+    </select>
+    <textarea id="edit-ws-tools" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical"></textarea>
+    <div id="edit-ws-parent-tools" style="font-size:11px;color:var(--text-dim);margin-top:4px;font-family:var(--mono)"></div>
     <div class="actions">
       <button class="btn" onclick="hideDialog('dialog-edit-workspace')">Cancel</button>
       <button class="btn btn-primary" onclick="saveWorkspace()">Save</button>
@@ -248,8 +258,13 @@
       <option value="bypassPermissions">Bypass Permissions</option>
       <option value="plan">Plan</option>
     </select>
-    <label>Allowed Tools (optional, one per line, inherits from workspace/global)</label>
-    <textarea id="sess-tools" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical" placeholder="(inherit from workspace/global)"></textarea>
+    <label>Allowed Tools (optional, one per line)</label>
+    <select id="sess-tools-mode" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;margin-bottom:4px">
+      <option value="inherit">Inherit</option>
+      <option value="override">Override</option>
+    </select>
+    <textarea id="sess-tools" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical"></textarea>
+    <div id="sess-parent-tools" style="font-size:11px;color:var(--text-dim);margin-top:4px;font-family:var(--mono)"></div>
     <div class="actions">
       <button class="btn" onclick="hideDialog('dialog-session')">Cancel</button>
       <button class="btn btn-primary" onclick="createSession()">Create</button>
@@ -261,15 +276,34 @@
 <div class="dialog-overlay hidden" id="dialog-edit-session">
   <div class="dialog">
     <h3>Edit Session</h3>
+    <label>Name</label>
+    <input type="text" id="edit-sess-name">
+    <label>Model</label>
+    <select id="edit-sess-model">
+      <option value="">(inherit)</option>
+      <option value="sonnet">Sonnet</option>
+      <option value="opus">Opus</option>
+      <option value="haiku">Haiku</option>
+    </select>
+    <label>Permission Mode</label>
+    <select id="edit-sess-permission">
+      <option value="">(inherit)</option>
+      <option value="default">Default</option>
+      <option value="acceptEdits">Accept Edits</option>
+      <option value="bypassPermissions">Bypass Permissions</option>
+      <option value="plan">Plan</option>
+    </select>
     <label>Allowed Tools (one per line)</label>
-    <textarea id="edit-sess-tools" rows="6" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical" placeholder="(inherit from workspace/global)"></textarea>
-    <div style="font-size:11px;color:var(--text-dim);margin-top:4px">
-      Tool names: Read, Edit, Write, Glob, Grep, Bash<br>
-      Bash patterns: Bash(git *), Bash(npm *), Bash(*)
-    </div>
+    <select id="edit-sess-tools-mode" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;margin-bottom:4px">
+      <option value="inherit">Inherit</option>
+      <option value="override">Override</option>
+    </select>
+    <textarea id="edit-sess-tools" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:var(--mono);resize:vertical"></textarea>
+    <div id="edit-sess-parent-tools" style="font-size:11px;color:var(--text-dim);margin-top:4px;font-family:var(--mono)"></div>
     <div class="actions">
       <button class="btn" onclick="hideDialog('dialog-edit-session')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveSessionTools()">Save</button>
+      <button class="btn btn-danger" onclick="deleteSessionFromEdit()" style="margin-right:auto">Delete</button>
+      <button class="btn btn-primary" onclick="saveSession()">Save</button>
     </div>
   </div>
 </div>
@@ -368,6 +402,7 @@ async function showCreateWorkspace() {
   document.getElementById('ws-model').value = '';
   document.getElementById('ws-permission').value = '';
   document.getElementById('ws-tools').value = '';
+  document.getElementById('ws-tools-mode').value = 'inherit';
   pickerCwd = '/';
   pickerOpen.clear();
   showDialog('dialog-workspace');
@@ -376,9 +411,7 @@ async function showCreateWorkspace() {
     const s = await api('GET', '/settings');
     document.querySelector('#ws-model option[value=""]').textContent = '(inherit: ' + modelLabel(s.model) + ')';
     document.querySelector('#ws-permission option[value=""]').textContent = '(inherit: ' + permLabel(s.permissionMode) + ')';
-    document.getElementById('ws-tools').placeholder = s.allowedTools?.length
-      ? '(inherit: ' + s.allowedTools.join(', ') + ')'
-      : '(no restrictions)';
+    renderParentTools('ws-parent-tools', s.allowedTools, 'global');
   } catch {}
 }
 
@@ -452,12 +485,14 @@ async function createWorkspace() {
   const model = document.getElementById('ws-model').value;
   const permissionMode = document.getElementById('ws-permission').value;
   const tools = parseTools(document.getElementById('ws-tools').value);
+  const toolsMode = document.getElementById('ws-tools-mode').value;
   if (!name || !cwd || cwd === '/') { showError('Select a directory and enter a name'); return; }
-  const body = { name, cwd };
+  const body = { name, cwd, allowedToolsMode: toolsMode };
   if (model) body.model = model;
   if (permissionMode) body.permissionMode = permissionMode;
   if (tools) body.allowedTools = tools;
   const ws = await api('POST', '/workspaces', body);
+  activeWorkspaceId = ws.id;
   hideDialog('dialog-workspace');
   htmx.ajax('GET', '/views/workspaces/' + ws.id + '/activate', { target: '#session-list', swap: 'outerHTML' });
   showCreateSession();
@@ -483,6 +518,7 @@ async function showCreateSession() {
   document.getElementById('sess-model').value = '';
   document.getElementById('sess-permission').value = '';
   document.getElementById('sess-tools').value = '';
+  document.getElementById('sess-tools-mode').value = 'inherit';
   showDialog('dialog-session');
   try {
     const [s, ws] = await Promise.all([
@@ -494,9 +530,7 @@ async function showCreateSession() {
     const inheritTools = ws.allowedTools || s.allowedTools;
     document.querySelector('#sess-model option[value=""]').textContent = '(inherit: ' + inheritModel + ')';
     document.querySelector('#sess-permission option[value=""]').textContent = '(inherit: ' + inheritPerm + ')';
-    document.getElementById('sess-tools').placeholder = inheritTools?.length
-      ? '(inherit: ' + inheritTools.join(', ') + ')'
-      : '(no restrictions)';
+    renderParentTools('sess-parent-tools', inheritTools, ws.allowedTools ? 'workspace' : 'global');
   } catch {}
 }
 
@@ -505,7 +539,8 @@ async function createSession() {
   const model = document.getElementById('sess-model').value;
   const permissionMode = document.getElementById('sess-permission').value;
   const tools = parseTools(document.getElementById('sess-tools').value);
-  const body = {};
+  const toolsMode = document.getElementById('sess-tools-mode').value;
+  const body = { allowedToolsMode: toolsMode };
   if (name) body.name = name;
   if (model) body.model = model;
   if (permissionMode) body.permissionMode = permissionMode;
@@ -543,11 +578,10 @@ async function showEditWorkspace(id) {
   document.getElementById('edit-ws-model').value = ws.model || '';
   document.getElementById('edit-ws-permission').value = ws.permissionMode || '';
   document.getElementById('edit-ws-tools').value = ws.allowedTools ? ws.allowedTools.join('\n') : '';
+  document.getElementById('edit-ws-tools-mode').value = ws.allowedToolsMode || 'override';
   document.querySelector('#edit-ws-model option[value=""]').textContent = '(inherit: ' + modelLabel(s.model) + ')';
   document.querySelector('#edit-ws-permission option[value=""]').textContent = '(inherit: ' + permLabel(s.permissionMode) + ')';
-  document.getElementById('edit-ws-tools').placeholder = s.allowedTools?.length
-    ? '(inherit: ' + s.allowedTools.join(', ') + ')'
-    : '(no restrictions)';
+  renderParentTools('edit-ws-parent-tools', s.allowedTools, 'global');
   showDialog('dialog-edit-workspace');
 }
 
@@ -556,8 +590,9 @@ async function saveWorkspace() {
   const model = document.getElementById('edit-ws-model').value;
   const permissionMode = document.getElementById('edit-ws-permission').value;
   const tools = parseTools(document.getElementById('edit-ws-tools').value);
+  const toolsMode = document.getElementById('edit-ws-tools-mode').value;
   if (!name) { showError('Name is required'); return; }
-  const body = { name };
+  const body = { name, allowedToolsMode: toolsMode };
   body.model = model || null;
   body.permissionMode = permissionMode || null;
   body.allowedTools = tools || null;
@@ -570,33 +605,60 @@ async function saveWorkspace() {
   }
 }
 
-// --- Edit session tools ---
+// --- Edit session ---
 let editingSessionId = null;
 async function showEditSession(sid) {
   editingSessionId = sid;
+  const wsId = activeWorkspaceId || (await api('GET', '/sessions/' + sid)).workspaceId;
   const [sess, ws, s] = await Promise.all([
     api('GET', '/sessions/' + sid),
-    api('GET', '/workspaces/' + activeWorkspaceId),
+    api('GET', '/workspaces/' + wsId),
     api('GET', '/settings'),
   ]);
+  document.getElementById('edit-sess-name').value = sess.name || '';
+  document.getElementById('edit-sess-model').value = sess.model || '';
+  document.getElementById('edit-sess-permission').value = sess.permissionMode || '';
   document.getElementById('edit-sess-tools').value = sess.allowedTools ? sess.allowedTools.join('\n') : '';
+  document.getElementById('edit-sess-tools-mode').value = sess.allowedToolsMode || 'inherit';
+  document.querySelector('#edit-sess-model option[value=""]').textContent = '(inherit: ' + modelLabel(ws.model || s.model) + ')';
+  document.querySelector('#edit-sess-permission option[value=""]').textContent = '(inherit: ' + permLabel(ws.permissionMode || s.permissionMode) + ')';
   const inheritTools = ws.allowedTools || s.allowedTools;
-  document.getElementById('edit-sess-tools').placeholder = inheritTools?.length
-    ? '(inherit: ' + inheritTools.join(', ') + ')'
-    : '(no restrictions)';
+  renderParentTools('edit-sess-parent-tools', inheritTools, ws.allowedTools ? 'workspace' : 'global');
   showDialog('dialog-edit-session');
 }
 
-async function saveSessionTools() {
+async function saveSession() {
+  const name = document.getElementById('edit-sess-name').value.trim();
+  const model = document.getElementById('edit-sess-model').value;
+  const permissionMode = document.getElementById('edit-sess-permission').value;
   const tools = parseTools(document.getElementById('edit-sess-tools').value);
-  await api('PATCH', '/sessions/' + editingSessionId, { allowedTools: tools || null });
+  const toolsMode = document.getElementById('edit-sess-tools-mode').value;
+  await api('PATCH', '/sessions/' + editingSessionId, {
+    name: name || null,
+    model: model || null,
+    permissionMode: permissionMode || null,
+    allowedTools: tools || null,
+    allowedToolsMode: toolsMode,
+  });
   hideDialog('dialog-edit-session');
   htmx.ajax('GET', '/views/sessions/' + editingSessionId + '/activate', { target: '#main-panel', swap: 'innerHTML' });
+}
+
+async function deleteSessionFromEdit() {
+  if (!confirm('Delete this session?')) return;
+  hideDialog('dialog-edit-session');
+  await deleteSession(editingSessionId);
 }
 
 function parseTools(text) {
   const lines = text.trim().split('\n').map(s => s.trim()).filter(Boolean);
   return lines.length ? lines : null;
+}
+
+function renderParentTools(elId, tools, source) {
+  const el = document.getElementById(elId);
+  if (!tools?.length) { el.innerHTML = '<em>Parent: no tools</em>'; return; }
+  el.innerHTML = 'Parent tools (' + esc(source) + '): ' + tools.map(t => esc(t)).join(', ');
 }
 
 // --- UI helpers ---

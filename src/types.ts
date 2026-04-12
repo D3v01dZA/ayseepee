@@ -12,6 +12,7 @@ export interface WorkspaceRow {
   name: string;
   cwd: string;
   allowed_tools: string | null;
+  allowed_tools_mode: "override" | "inherit";
   system_prompt: string | null;
   permission_mode: string;
   model: string | null;
@@ -26,6 +27,7 @@ export interface SessionRow {
   model: string | null;
   permission_mode: string | null;
   allowed_tools: string | null;
+  allowed_tools_mode: "override" | "inherit";
   status: "idle" | "active" | "error";
   created_at: string;
   last_active_at: string;
@@ -77,6 +79,7 @@ export interface CreateWorkspaceBody {
   name: string;
   cwd: string;
   allowedTools?: string[];
+  allowedToolsMode?: "override" | "inherit";
   systemPrompt?: string;
   permissionMode?: string;
   model?: string;
@@ -86,6 +89,7 @@ export interface UpdateWorkspaceBody {
   name?: string;
   cwd?: string;
   allowedTools?: string[] | null;
+  allowedToolsMode?: "override" | "inherit";
   systemPrompt?: string | null;
   permissionMode?: string;
   model?: string | null;
@@ -96,6 +100,7 @@ export interface CreateSessionBody {
   model?: string;
   permissionMode?: string;
   allowedTools?: string[];
+  allowedToolsMode?: "override" | "inherit";
 }
 
 export interface UpdateSessionBody {
@@ -103,6 +108,7 @@ export interface UpdateSessionBody {
   model?: string;
   permissionMode?: string;
   allowedTools?: string[] | null;
+  allowedToolsMode?: "override" | "inherit";
 }
 
 export interface SendMessageBody {
@@ -136,6 +142,7 @@ export interface WorkspaceResponse {
   name: string;
   cwd: string;
   allowedTools: string[] | null;
+  allowedToolsMode: "override" | "inherit";
   systemPrompt: string | null;
   permissionMode: string;
   model: string | null;
@@ -150,6 +157,7 @@ export interface SessionResponse {
   model: string | null;
   permissionMode: string | null;
   allowedTools: string[] | null;
+  allowedToolsMode: "override" | "inherit";
   status: string;
   createdAt: string;
   lastActiveAt: string;
