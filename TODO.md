@@ -11,6 +11,7 @@
 ## Frontend
 - [x] Chat "streaming/pending" status indicator disappears too early — keep visible until message is complete
 - [x] Show tool use events in message feed (currently only assistant text and results render)
+- [ ] Make mobile friendly with hamburger menu
 
 ## Token Usage
 - [ ] Use https://github.com/JuliusBrussee/caveman

@@ -11,6 +11,7 @@ import { interruptAllQueries } from "./agent.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+const HOSTNAME = process.env.HOSTNAME ?? "127.0.0.1";
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 const DB_PATH = process.env.DB_PATH ?? "ayseepee.db";
 const API_KEY = process.env.API_KEY;
@@ -34,8 +35,8 @@ const server = createServer((req, res) => {
   router.handle(req, res);
 });
 
-server.listen(PORT, () => {
-  console.log(`ayseepee listening on http://localhost:${PORT}`);
+server.listen(PORT, HOSTNAME, () => {
+  console.log(`ayseepee listening on http://${HOSTNAME}:${PORT}`);
 });
 
 function shutdown() {
