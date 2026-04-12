@@ -1,8 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { Router, type RouteContext } from "../router.js";
-import { getDb } from "../db.js";
-import type { WorkspaceRow, CreateWorkspaceBody, UpdateWorkspaceBody, WorkspaceResponse } from "../types.js";
+import * as Workspaces from "../data/workspaces.js";
+import type { CreateWorkspaceBody, UpdateWorkspaceBody, WorkspaceRow, WorkspaceResponse } from "../types.js";
 
 export function registerWorkspaceRoutes(router: Router): void {
   router.post("/api/v1/workspaces", createWorkspace);
@@ -26,99 +25,65 @@ async function createWorkspace(ctx: RouteContext) {
     return { status: 400, body: { error: `Directory not found: ${body.cwd}` } };
   }
 
-  const db = getDb();
-  const id = randomUUID();
-  db.prepare(
-    `INSERT INTO workspaces (id, name, cwd, allowed_tools, system_prompt, permission_mode)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    body.name,
+  const row = Workspaces.createWorkspace({
+    name: body.name,
     cwd,
-    body.allowedTools ? JSON.stringify(body.allowedTools) : null,
-    body.systemPrompt ?? null,
-    body.permissionMode ?? "default"
-  );
+    allowedTools: body.allowedTools,
+    systemPrompt: body.systemPrompt,
+    permissionMode: body.permissionMode,
+  });
 
-  return { status: 201, body: rowToWorkspace(db.prepare("SELECT * FROM workspaces WHERE id = ?").get(id) as WorkspaceRow) };
+  return { status: 201, body: rowToWorkspace(row) };
 }
 
 function listWorkspaces() {
-  const db = getDb();
-  const rows = db.prepare("SELECT * FROM workspaces ORDER BY created_at DESC").all() as WorkspaceRow[];
-  return { status: 200, body: rows.map(rowToWorkspace) };
+  return { status: 200, body: Workspaces.listWorkspaces().map(rowToWorkspace) };
 }
 
 function getWorkspace(ctx: RouteContext) {
-  const db = getDb();
-  const row = db.prepare("SELECT * FROM workspaces WHERE id = ?").get(ctx.params.id) as WorkspaceRow | undefined;
+  const row = Workspaces.getWorkspace(ctx.params.id);
   if (!row) return { status: 404, body: { error: "Workspace not found" } };
   return { status: 200, body: rowToWorkspace(row) };
 }
 
 async function updateWorkspace(ctx: RouteContext) {
-  const db = getDb();
-  const existing = db.prepare("SELECT * FROM workspaces WHERE id = ?").get(ctx.params.id) as WorkspaceRow | undefined;
+  const existing = Workspaces.getWorkspace(ctx.params.id);
   if (!existing) return { status: 404, body: { error: "Workspace not found" } };
 
   const body = ctx.body as UpdateWorkspaceBody | undefined;
   if (!body) return { status: 400, body: { error: "Request body required" } };
 
-  const fields: string[] = [];
-  const values: unknown[] = [];
+  const fields: Parameters<typeof Workspaces.updateWorkspace>[1] = {};
+  let hasFields = false;
 
-  if (body.name !== undefined) {
-    fields.push("name = ?");
-    values.push(body.name);
-  }
+  if (body.name !== undefined) { fields.name = body.name; hasFields = true; }
   if (body.cwd !== undefined) {
     try {
-      const resolved = await realpath(body.cwd);
-      fields.push("cwd = ?");
-      values.push(resolved);
+      fields.cwd = await realpath(body.cwd);
+      hasFields = true;
     } catch {
       return { status: 400, body: { error: `Directory not found: ${body.cwd}` } };
     }
   }
-  if (body.allowedTools !== undefined) {
-    fields.push("allowed_tools = ?");
-    values.push(body.allowedTools ? JSON.stringify(body.allowedTools) : null);
-  }
-  if (body.systemPrompt !== undefined) {
-    fields.push("system_prompt = ?");
-    values.push(body.systemPrompt ?? null);
-  }
-  if (body.permissionMode !== undefined) {
-    fields.push("permission_mode = ?");
-    values.push(body.permissionMode || "default");
-  }
+  if (body.allowedTools !== undefined) { fields.allowedTools = body.allowedTools; hasFields = true; }
+  if (body.systemPrompt !== undefined) { fields.systemPrompt = body.systemPrompt; hasFields = true; }
+  if (body.permissionMode !== undefined) { fields.permissionMode = body.permissionMode; hasFields = true; }
 
-  if (fields.length === 0) {
-    return { status: 400, body: { error: "No fields to update" } };
-  }
+  if (!hasFields) return { status: 400, body: { error: "No fields to update" } };
 
-  values.push(ctx.params.id);
-  db.prepare(`UPDATE workspaces SET ${fields.join(", ")} WHERE id = ?`).run(...values);
-
-  const updated = db.prepare("SELECT * FROM workspaces WHERE id = ?").get(ctx.params.id) as WorkspaceRow;
+  const updated = Workspaces.updateWorkspace(ctx.params.id, fields);
   return { status: 200, body: rowToWorkspace(updated) };
 }
 
 function deleteWorkspace(ctx: RouteContext) {
-  const db = getDb();
-  const existing = db.prepare("SELECT * FROM workspaces WHERE id = ?").get(ctx.params.id) as WorkspaceRow | undefined;
+  const existing = Workspaces.getWorkspace(ctx.params.id);
   if (!existing) return { status: 404, body: { error: "Workspace not found" } };
 
-  const { count: activeCount } = db
-    .prepare("SELECT COUNT(*) as count FROM sessions WHERE workspace_id = ? AND status = 'active'")
-    .get(ctx.params.id) as { count: number };
-
-  if (activeCount > 0) {
+  if (Workspaces.getActiveSessionCount(ctx.params.id) > 0) {
     return { status: 409, body: { error: "Workspace has active sessions" } };
   }
 
-  db.prepare("DELETE FROM sessions WHERE workspace_id = ?").run(ctx.params.id);
-  db.prepare("DELETE FROM workspaces WHERE id = ?").run(ctx.params.id);
+  Workspaces.deleteWorkspace(ctx.params.id);
   return { status: 204 };
 }
 

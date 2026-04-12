@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ayseepee</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   * { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; }
@@ -101,7 +102,6 @@
   /* File picker */
   .filepicker { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); margin-top: 8px; max-height: 350px; min-height: 150px; display: flex; flex-direction: column; overflow: hidden; }
   .filepicker-path { font-family: var(--mono); font-size: 12px; color: var(--text-dim); padding: 6px 10px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-
   .filepicker-crumbs { display: flex; align-items: center; gap: 2px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .filepicker-crumbs span { cursor: pointer; color: var(--accent); }
   .filepicker-crumbs span:hover { text-decoration: underline; }
@@ -109,7 +109,6 @@
   .filepicker-list { list-style: none; overflow-y: auto; flex: 1; }
   .filepicker-item { padding: 4px 10px; cursor: pointer; font-size: 13px; font-family: var(--mono); display: flex; align-items: center; gap: 6px; }
   .filepicker-item:hover { background: rgba(255,255,255,0.05); }
-  .filepicker-item.selected { background: rgba(88,166,255,0.12); color: var(--accent); }
   .filepicker-icon { width: 16px; text-align: center; font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
 
   /* Toast */
@@ -126,27 +125,17 @@
     <div class="sidebar-section">
       <h2>Workspaces <button class="btn btn-sm" onclick="showCreateWorkspace()">+</button></h2>
     </div>
-    <ul class="sidebar-list" id="workspace-list"></ul>
+    <ul id="workspace-list" class="sidebar-list"
+        hx-get="/views/workspaces" hx-trigger="load, refresh" hx-swap="outerHTML"></ul>
     <div class="sidebar-section">
-      <h2>Sessions <button class="btn btn-sm" id="btn-new-session" onclick="showCreateSession()">+</button></h2>
+      <h2>Sessions <button class="btn btn-sm" onclick="showCreateSession()">+</button></h2>
     </div>
-    <ul class="sidebar-list" id="session-list"></ul>
+    <ul id="session-list" class="sidebar-list"></ul>
   </div>
 
-  <div class="main">
-    <div class="main-header">
-      <div>
-        <h2 id="main-title">Select a session</h2>
-        <div class="meta" id="main-meta"></div>
-      </div>
-      <div id="main-actions"></div>
-    </div>
-    <div class="main-empty" id="empty-state">Create a workspace and session to get started</div>
-    <div class="messages hidden" id="messages-feed"></div>
-    <div class="input-bar hidden" id="input-bar">
-      <input type="text" id="prompt-input" placeholder="Send a message..." onkeydown="if(event.key==='Enter')sendMessage()">
-      <button class="btn btn-primary" onclick="sendMessage()">Send</button>
-    </div>
+  <div class="main" id="main-panel">
+    <div class="main-header"><h2>Select a session</h2></div>
+    <div class="main-empty">Create a workspace and session to get started</div>
   </div>
 </div>
 
@@ -202,47 +191,80 @@
   </div>
 </div>
 
+<div class="toast hidden" id="toast"></div>
+
 <script>
 const API = '/api/v1';
 
-// API key: check URL param first, then localStorage
+// --- API key management ---
 const urlKey = new URLSearchParams(window.location.search).get('api_key');
 let apiKey = urlKey || localStorage.getItem('ayseepee_api_key') || '';
 if (urlKey) {
   localStorage.setItem('ayseepee_api_key', urlKey);
-  // Strip key from URL so it's not visible in browser history
   const clean = new URL(window.location.href);
   clean.searchParams.delete('api_key');
   window.history.replaceState({}, '', clean.pathname + clean.search);
 }
+if (!apiKey) promptForApiKey();
 
-let state = {
-  workspaces: [],
-  sessions: [],
-  activeWorkspaceId: null,
-  activeSessionId: null,
-  messages: [],     // message objects for current session
-  pollTimers: {},   // messageId -> intervalId
-};
+function promptForApiKey(msg) {
+  const key = prompt(msg ? msg + ' Enter API key:' : 'Enter API key:');
+  if (key) {
+    apiKey = key.trim();
+    localStorage.setItem('ayseepee_api_key', apiKey);
+    location.reload();
+  }
+}
 
-// --- API helpers ---
+// --- htmx configuration ---
+
+// Add auth header to all htmx requests
+document.body.addEventListener('htmx:configRequest', (e) => {
+  e.detail.headers['Authorization'] = 'Bearer ' + apiKey;
+});
+
+// Handle HTTP errors
+document.body.addEventListener('htmx:beforeSwap', (e) => {
+  if (e.detail.xhr.status === 401) {
+    e.detail.shouldSwap = false;
+    promptForApiKey('Invalid API key.');
+  } else if (e.detail.xhr.status === 409) {
+    e.detail.shouldSwap = false;
+    showError('Session has an active query. Wait or interrupt it.');
+  } else if (e.detail.xhr.status >= 400) {
+    e.detail.shouldSwap = false;
+    showError('Request failed (' + e.detail.xhr.status + ')');
+  }
+});
+
+// Auto-scroll messages feed
+document.body.addEventListener('htmx:afterSwap', (e) => {
+  const feed = document.getElementById('messages-feed');
+  if (feed && (feed.contains(e.detail.target) || e.detail.target === feed)) {
+    feed.scrollTop = feed.scrollHeight;
+  }
+});
+
+// Track active workspace ID (extracted from htmx request paths)
+let activeWorkspaceId = null;
+document.body.addEventListener('htmx:afterRequest', (e) => {
+  const path = e.detail.pathInfo?.requestPath || '';
+  const wsMatch = path.match(/\/views\/workspaces\/([^/]+)\/activate/);
+  if (wsMatch) activeWorkspaceId = wsMatch[1];
+});
+
+// --- API helper (for dialog-based creates/deletes) ---
 async function api(method, path, body) {
-  const opts = { method, headers: { 'Authorization': `Bearer ${apiKey}` } };
+  const opts = { method, headers: { 'Authorization': 'Bearer ' + apiKey } };
   if (body) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
   const res = await fetch(API + path, opts);
-  if (res.status === 401) {
-    promptForApiKey('Invalid API key.');
-    throw new Error('Unauthorized');
-  }
+  if (res.status === 401) { promptForApiKey('Invalid API key.'); throw new Error('Unauthorized'); }
   if (res.status === 204) return null;
   const data = await res.json();
-  if (!res.ok) {
-    showError(data.error || `Request failed (${res.status})`);
-    throw new Error(data.error || `Request failed (${res.status})`);
-  }
+  if (!res.ok) { showError(data.error || 'Request failed'); throw new Error(data.error); }
   return data;
 }
 
@@ -254,45 +276,7 @@ function showError(msg) {
   el._timer = setTimeout(() => el.classList.add('hidden'), 5000);
 }
 
-function promptForApiKey(msg) {
-  const key = prompt(msg ? msg + ' Enter API key:' : 'Enter API key:');
-  if (key) {
-    apiKey = key.trim();
-    localStorage.setItem('ayseepee_api_key', apiKey);
-    loadWorkspaces();
-  }
-}
-
-// --- Workspaces ---
-async function loadWorkspaces() {
-  try {
-    state.workspaces = await api('GET', '/workspaces');
-    renderWorkspaces();
-  } catch (e) {
-    if (e.message !== 'Unauthorized') throw e;
-  }
-}
-
-function renderWorkspaces() {
-  const el = document.getElementById('workspace-list');
-  el.innerHTML = state.workspaces.map(w => `
-    <li class="sidebar-item ${w.id === state.activeWorkspaceId ? 'active' : ''}"
-        onclick="selectWorkspace('${w.id}')">
-      <span>${esc(w.name)}</span>
-      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteWorkspace('${w.id}')">&times;</button>
-    </li>
-  `).join('');
-}
-
-async function selectWorkspace(id) {
-  state.activeWorkspaceId = id;
-  state.activeSessionId = null;
-  renderWorkspaces();
-  await loadSessions();
-  showEmptyState();
-}
-
-// --- File picker ---
+// --- Workspace CRUD ---
 let pickerCwd = '/';
 let pickerOpen = new Set();
 
@@ -311,23 +295,20 @@ async function loadPicker() {
 }
 
 function renderPicker(data) {
-  // Breadcrumb path + hidden toggle
   const pathEl = document.getElementById('filepicker-path');
   const parts = pickerCwd.split('/').filter(Boolean);
-  let crumbs = `<span onclick="pickerNavigate('/')">/</span>`;
+  let crumbs = '<span onclick="pickerNavigate(\'/\')">/ </span>';
   let built = '';
   for (const p of parts) {
     built += '/' + p;
     const target = built;
-    crumbs += `<span onclick="pickerNavigate('${esc(target)}')">${esc(p)}/</span>`;
+    crumbs += '<span onclick="pickerNavigate(\'' + esc(target) + '\')">' + esc(p) + '/</span>';
   }
   const checked = document.getElementById('filepicker-hidden')?.checked ? 'checked' : '';
-  pathEl.innerHTML = `<div class="filepicker-crumbs">${crumbs}</div><label class="filepicker-toggle"><input type="checkbox" id="filepicker-hidden" ${checked} onchange="loadPicker()"><div>hidden</div></label>`;
+  pathEl.innerHTML = '<div class="filepicker-crumbs">' + crumbs + '</div><label class="filepicker-toggle"><input type="checkbox" id="filepicker-hidden" ' + checked + ' onchange="loadPicker()"><div>hidden</div></label>';
 
-  // Build flat list with indentation
   const listEl = document.getElementById('filepicker-list');
   let html = '';
-
   function renderDir(key, entries) {
     const depth = key === '/' ? 0 : key.split('/').filter(Boolean).length;
     const pad = 10 + depth * 16;
@@ -336,42 +317,32 @@ function renderPicker(data) {
       if (e.type === 'directory') {
         const isOpen = pickerOpen.has(relPath);
         const absPath = pickerCwd.replace(/\/$/, '') + '/' + relPath;
-        html += `<li class="filepicker-item" style="padding-left:${pad}px">
-          <span class="filepicker-icon" onclick="event.stopPropagation();pickerToggle('${esc(relPath)}')">${isOpen ? '\u25BE' : '\u25B8'}</span>
-          <span onclick="pickerNavigate('${esc(absPath)}')">${esc(e.name)}/</span>
-        </li>`;
-        // Render children if open
+        html += '<li class="filepicker-item" style="padding-left:' + pad + 'px">' +
+          '<span class="filepicker-icon" onclick="event.stopPropagation();pickerToggle(\'' + esc(relPath) + '\')">' + (isOpen ? '\u25BE' : '\u25B8') + '</span>' +
+          '<span onclick="pickerNavigate(\'' + esc(absPath) + '\')">' + esc(e.name) + '/</span></li>';
         if (isOpen && data.entries['/' + relPath]) {
           renderDir('/' + relPath, data.entries['/' + relPath]);
         }
       } else {
-        html += `<li class="filepicker-item" style="padding-left:${pad}px;color:var(--text-dim);cursor:default">
-          <span class="filepicker-icon">&middot;</span>${esc(e.name)}
-        </li>`;
+        html += '<li class="filepicker-item" style="padding-left:' + pad + 'px;color:var(--text-dim);cursor:default">' +
+          '<span class="filepicker-icon">&middot;</span>' + esc(e.name) + '</li>';
       }
     }
   }
-
-  if (data.entries['/']) {
-    renderDir('/', data.entries['/']);
-  }
+  if (data.entries['/']) renderDir('/', data.entries['/']);
   listEl.innerHTML = html;
 }
 
 function pickerNavigate(path) {
   pickerCwd = path;
   pickerOpen.clear();
-  // Auto-fill name from last directory segment
   const segments = path.split('/').filter(Boolean);
-  if (segments.length > 0) {
-    document.getElementById('ws-name').value = segments[segments.length - 1];
-  }
+  if (segments.length > 0) document.getElementById('ws-name').value = segments[segments.length - 1];
   loadPicker();
 }
 
 function pickerToggle(relPath) {
   if (pickerOpen.has(relPath)) {
-    // Close this and any children
     for (const p of [...pickerOpen]) {
       if (p === relPath || p.startsWith(relPath + '/')) pickerOpen.delete(p);
     }
@@ -381,63 +352,32 @@ function pickerToggle(relPath) {
   loadPicker();
 }
 
-function pickerSelectedPath() {
-  return pickerCwd;
-}
-
 async function createWorkspace() {
   const name = document.getElementById('ws-name').value.trim();
-  const cwd = pickerSelectedPath();
+  const cwd = pickerCwd;
   const permissionMode = document.getElementById('ws-permission').value;
-  if (!name || !cwd || cwd === '/') {
-    showError('Select a directory and enter a name');
-    return;
-  }
-  await api('POST', '/workspaces', { name, cwd, permissionMode });
+  if (!name || !cwd || cwd === '/') { showError('Select a directory and enter a name'); return; }
+  const ws = await api('POST', '/workspaces', { name, cwd, permissionMode });
   hideDialog('dialog-workspace');
-  await loadWorkspaces();
+  htmx.ajax('GET', '/views/workspaces/' + ws.id + '/activate', { target: '#session-list', swap: 'outerHTML' });
 }
 
 async function deleteWorkspace(id) {
-  const res = await api('DELETE', `/workspaces/${id}`);
-  if (res && res.error) { alert(res.error); return; }
-  if (state.activeWorkspaceId === id) {
-    state.activeWorkspaceId = null;
-    state.activeSessionId = null;
-    document.getElementById('session-list').innerHTML = '';
-    showEmptyState();
-  }
-  await loadWorkspaces();
-}
-
-// --- Sessions ---
-async function loadSessions() {
-  if (!state.activeWorkspaceId) { state.sessions = []; renderSessions(); return; }
-  state.sessions = await api('GET', `/workspaces/${state.activeWorkspaceId}/sessions`);
-  renderSessions();
-  // Keep title in sync
-  if (state.activeSessionId) {
-    const s = state.sessions.find(s => s.id === state.activeSessionId);
-    if (s) document.getElementById('main-title').textContent = s.name || s.id.slice(0, 8);
+  if (!confirm('Delete this workspace?')) return;
+  try { await api('DELETE', '/workspaces/' + id); } catch { return; }
+  htmx.trigger('#workspace-list', 'refresh');
+  if (activeWorkspaceId === id) {
+    activeWorkspaceId = null;
+    document.getElementById('session-list').outerHTML = '<ul id="session-list" class="sidebar-list"></ul>';
+    document.getElementById('main-panel').innerHTML =
+      '<div class="main-header"><h2>Select a session</h2></div>' +
+      '<div class="main-empty">Create a workspace and session to get started</div>';
   }
 }
 
-function renderSessions() {
-  const el = document.getElementById('session-list');
-  el.innerHTML = state.sessions.map(s => `
-    <li class="sidebar-item ${s.id === state.activeSessionId ? 'active' : ''}"
-        onclick="selectSession('${s.id}')">
-      <span>${esc(s.name || s.id.slice(0, 8))}</span>
-      <span class="status status-${s.status}">${s.status}</span>
-    </li>
-  `).join('');
-}
-
+// --- Session CRUD ---
 function showCreateSession() {
-  if (!state.activeWorkspaceId) {
-    showError('Select a workspace first');
-    return;
-  }
+  if (!activeWorkspaceId) { showError('Select a workspace first'); return; }
   document.getElementById('sess-name').value = '';
   document.getElementById('sess-model').value = 'sonnet';
   document.getElementById('sess-permission').value = '';
@@ -451,321 +391,30 @@ async function createSession() {
   const body = { model };
   if (name) body.name = name;
   if (permissionMode) body.permissionMode = permissionMode;
-  const s = await api('POST', `/workspaces/${state.activeWorkspaceId}/sessions`, body);
+  const s = await api('POST', '/workspaces/' + activeWorkspaceId + '/sessions', body);
   hideDialog('dialog-session');
-  await loadSessions();
-  selectSession(s.id);
-}
-
-async function selectSession(id) {
-  state.activeSessionId = id;
-  renderSessions();
-  await loadSessionView();
-}
-
-// --- Session view ---
-async function loadSessionView() {
-  if (!state.activeSessionId) { showEmptyState(); return; }
-
-  const session = state.sessions.find(s => s.id === state.activeSessionId);
-  const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
-
-  const titleEl = document.getElementById('main-title');
-  titleEl.textContent = session?.name || session?.id.slice(0, 8) || 'Session';
-  titleEl.style.cursor = 'pointer';
-  titleEl.title = 'Click to rename';
-  titleEl.onclick = () => {
-    const name = prompt('Rename session:', titleEl.textContent);
-    if (name !== null && name.trim()) updateSessionSetting('name', name.trim());
-  };
-  document.getElementById('main-meta').textContent = workspace?.cwd || '';
-  const permMode = session?.permissionMode || workspace?.permissionMode || 'default';
-  const modelVal = session?.model || '';
-  document.getElementById('main-actions').innerHTML = `
-    <select id="session-model" class="btn btn-sm" onchange="updateSessionSetting('model', this.value)">
-      <option value="sonnet" ${!modelVal || modelVal === 'sonnet' ? 'selected' : ''}>Sonnet</option>
-      <option value="opus" ${modelVal === 'opus' ? 'selected' : ''}>Opus</option>
-      <option value="haiku" ${modelVal === 'haiku' ? 'selected' : ''}>Haiku</option>
-    </select>
-    <select id="session-perm" class="btn btn-sm" onchange="updateSessionSetting('permissionMode', this.value)">
-      <option value="" ${!session?.permissionMode ? 'selected' : ''}>(inherit: ${permModeLabel(workspace?.permissionMode)})</option>
-      <option value="default" ${session?.permissionMode === 'default' ? 'selected' : ''}>Default</option>
-      <option value="acceptEdits" ${session?.permissionMode === 'acceptEdits' ? 'selected' : ''}>Accept Edits</option>
-      <option value="bypassPermissions" ${session?.permissionMode === 'bypassPermissions' ? 'selected' : ''}>Bypass Permissions</option>
-      <option value="plan" ${session?.permissionMode === 'plan' ? 'selected' : ''}>Plan</option>
-    </select>
-    <button class="btn btn-sm btn-danger" onclick="deleteSession('${state.activeSessionId}')">Delete</button>
-  `;
-
-  document.getElementById('empty-state').classList.add('hidden');
-  document.getElementById('messages-feed').classList.remove('hidden');
-  document.getElementById('input-bar').classList.remove('hidden');
-
-  // Load messages from the server
-  const msgs = await api('GET', `/sessions/${state.activeSessionId}/messages`);
-  state.messages[state.activeSessionId] = msgs.map(m => ({
-    id: m.id,
-    prompt: m.prompt,
-    status: m.status,
-    result: m.result,
-    events: m.events || [],
-    lastEventId: m.events?.length ? m.events[m.events.length - 1].id : 0,
-  }));
-
-  // Resume polling for any active messages
-  for (const m of state.messages[state.activeSessionId]) {
-    if (m.status === 'pending' || m.status === 'streaming') {
-      startPolling(m.id);
-    }
-  }
-
-  renderMessages();
-}
-
-async function loadMessages() {
-  // Get session messages by querying each known message
-  // For now, we track messages client-side per session
-  const feed = document.getElementById('messages-feed');
-  if (!state.messages[state.activeSessionId]) {
-    state.messages[state.activeSessionId] = [];
-  }
-  renderMessages();
-}
-
-function renderMessages() {
-  const feed = document.getElementById('messages-feed');
-  const msgs = state.messages[state.activeSessionId] || [];
-
-  if (msgs.length === 0) {
-    feed.innerHTML = '<div style="color: var(--text-dim); text-align: center; margin-top: 40px; font-size: 13px;">No messages yet. Send a prompt to begin.</div>';
-    return;
-  }
-
-  feed.innerHTML = msgs.map(m => `
-    <div class="message-group" id="msg-${m.id}">
-      <div class="message-prompt">
-        <div class="label">You</div>
-        ${esc(m.prompt)}
-      </div>
-      <div class="message-events" id="events-${m.id}">
-        ${renderEvents(m)}
-      </div>
-    </div>
-  `).join('');
-
-  feed.scrollTop = feed.scrollHeight;
-}
-
-function renderEvents(msg) {
-  const isActive = msg.status === 'pending' || msg.status === 'streaming';
-
-  if (!msg.events || msg.events.length === 0) {
-    return isActive ? '<div class="event"><span class="event-type">waiting...</span></div>' : '';
-  }
-
-  const rendered = msg.events.map(e => {
-    if (e.data?.type === 'assistant') {
-      const parts = [];
-      const content = e.data?.message?.content || [];
-      for (const block of content) {
-        if (block.type === 'text' && block.text) {
-          parts.push(`<div class="event-assistant">${esc(block.text)}</div>`);
-        } else if (block.type === 'tool_use') {
-          parts.push(`<div class="event-tool-use">
-            <span class="tool-name">${esc(block.name)}</span>
-            <div class="tool-input">${esc(formatToolInput(block.input))}</div>
-          </div>`);
-        }
-      }
-      return parts.length ? `<div class="event">${parts.join('')}</div>` : '';
-    }
-    if (e.type === 'permission_request') {
-      const resolved = e.data.resolved;
-      const inner = (resolved && resolved !== 'pending')
-        ? `<div class="perm-resolved">${resolved === 'allowed' ? 'Allowed' : 'Denied'}</div>`
-        : `<div class="perm-actions">
-            <button class="btn btn-sm" style="background:var(--green);color:#000;border:none;" onclick="resolvePermission('${e.data.id}', true)">Allow</button>
-            <button class="btn btn-sm" style="background:var(--red);color:#fff;border:none;" onclick="resolvePermission('${e.data.id}', false)">Deny</button>
-          </div>`;
-      return `<div class="event"><div class="event-permission">
-        <div class="perm-title">${esc(e.data.title || e.data.tool_name)}</div>
-        ${e.data.description ? `<div class="perm-desc">${esc(e.data.description)}</div>` : ''}
-        ${inner}
-      </div></div>`;
-    }
-    if (e.type?.startsWith('result')) {
-      const isError = e.data?.is_error;
-      const model = e.data?.modelUsage ? Object.keys(e.data.modelUsage)[0] : null;
-      const modelTag = model ? `<span class="event-model">${esc(shortModel(model))}</span> ` : '';
-      const errorText = isError && e.data?.error ? esc(e.data.error) : '';
-      return `<div class="event"><div class="event-result ${isError ? 'error' : ''}">
-        ${errorText}
-        <div class="cost">${modelTag}${e.data?.total_cost_usd ? '$' + e.data.total_cost_usd.toFixed(4) : ''} ${e.data?.duration_ms ? (e.data.duration_ms / 1000).toFixed(1) + 's' : ''}</div>
-      </div></div>`;
-    }
-    if (e.data?.type === 'user' && e.data?.tool_use_result !== undefined) {
-      const result = formatToolResult(e.data.tool_use_result);
-      if (!result) return '';
-      return `<div class="event"><div class="event-tool-result">${esc(result)}</div></div>`;
-    }
-    if (e.data?.type === 'tool_use_summary') {
-      return `<div class="event"><div class="event-tool-result">${esc(e.data.summary)}</div></div>`;
-    }
-    if (e.data?.type === 'system' && e.data?.subtype === 'init') return '';
-    return '';
-  }).join('');
-
-  // If still active but all events rendered as empty (e.g. only system events), show waiting
-  if (isActive && !rendered.trim()) {
-    return rendered + '<div class="event"><span class="event-type">waiting...</span></div>';
-  }
-  return rendered;
-}
-
-function extractAssistantText(data) {
-  if (!data?.message?.content) return '';
-  return data.message.content
-    .filter(c => c.type === 'text')
-    .map(c => c.text)
-    .join('');
-}
-
-// --- Send message ---
-async function sendMessage() {
-  if (!state.activeSessionId) return;
-  const input = document.getElementById('prompt-input');
-  const prompt = input.value.trim();
-  if (!prompt) return;
-  input.value = '';
-
-  const res = await api('POST', `/sessions/${state.activeSessionId}/messages`, { prompt });
-  if (res.error) { alert(res.error); return; }
-
-  if (!state.messages[state.activeSessionId]) {
-    state.messages[state.activeSessionId] = [];
-  }
-  state.messages[state.activeSessionId].push({
-    id: res.id,
-    prompt,
-    status: 'pending',
-    events: [],
-    lastEventId: 0,
-  });
-
-  renderMessages();
-  startPolling(res.id);
-}
-
-function startPolling(messageId) {
-  if (state.pollTimers[messageId]) return;
-  state.pollTimers[messageId] = setInterval(() => pollMessage(messageId), 1000);
-}
-
-async function pollMessage(messageId) {
-  const msgs = state.messages[state.activeSessionId];
-  if (!msgs) return;
-  const msg = msgs.find(m => m.id === messageId);
-  if (!msg) return;
-
-  const data = await api('GET', `/messages/${messageId}?after=${msg.lastEventId}`);
-  if (!data) return;
-
-  msg.status = data.status;
-  msg.result = data.result;
-  msg.costUsd = data.costUsd;
-  msg.durationMs = data.durationMs;
-
-  if (data.events && data.events.length > 0) {
-    msg.events.push(...data.events);
-    msg.lastEventId = data.events[data.events.length - 1].id;
-  }
-
-  renderMessages();
-
-  // Also refresh session status in sidebar
-  loadSessions();
-
-  if (data.status === 'complete' || data.status === 'error') {
-    clearInterval(state.pollTimers[messageId]);
-    delete state.pollTimers[messageId];
-  }
-}
-
-async function resolvePermission(id, allow) {
-  await api('POST', `/permissions/${id}/resolve`, { allow });
-  // Update the event data locally so re-render reflects it immediately
-  const msgs = state.messages[state.activeSessionId] || [];
-  for (const m of msgs) {
-    const ev = (m.events || []).find(e => e.data?.id === id);
-    if (ev) ev.data.resolved = allow ? 'allowed' : 'denied';
-  }
-  renderMessages();
-}
-
-function formatToolResult(result) {
-  if (!result) return '';
-  if (typeof result === 'string') return result;
-  // Bash tool results: extract stdout/stderr
-  if (typeof result === 'object' && ('stdout' in result || 'stderr' in result)) {
-    const parts = [];
-    if (result.stdout) parts.push(result.stdout);
-    if (result.stderr) parts.push(result.stderr);
-    return parts.join('\n').trim();
-  }
-  // Content arrays (Read tool, etc.)
-  if (Array.isArray(result)) {
-    return result.map(r => r.text || r.content || JSON.stringify(r)).join('\n');
-  }
-  return JSON.stringify(result, null, 2);
-}
-
-function formatToolInput(input) {
-  if (!input || typeof input !== 'object') return String(input || '');
-  const entries = Object.entries(input);
-  return entries.map(([k, v]) => {
-    const val = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
-    return `${k}: ${val}`;
-  }).join('\n');
-}
-
-async function updateSessionSetting(field, value) {
-  if (!state.activeSessionId) return;
-  const updated = await api('PATCH', `/sessions/${state.activeSessionId}`, { [field]: value });
-  const idx = state.sessions.findIndex(s => s.id === state.activeSessionId);
-  if (idx >= 0) state.sessions[idx] = updated;
-  await loadSessions();
+  htmx.ajax('GET', '/views/sessions/' + s.id + '/activate', { target: '#main-panel', swap: 'innerHTML' });
 }
 
 async function deleteSession(id) {
-  await api('DELETE', `/sessions/${id}`);
-  delete state.messages[id];
-  state.activeSessionId = null;
-  showEmptyState();
-  await loadSessions();
+  if (!confirm('Delete this session?')) return;
+  try { await api('DELETE', '/sessions/' + id); } catch { return; }
+  if (activeWorkspaceId) {
+    htmx.ajax('GET', '/views/workspaces/' + activeWorkspaceId + '/activate', { target: '#session-list', swap: 'outerHTML' });
+  }
+}
+
+async function renameSession(sid) {
+  const title = document.getElementById('main-title');
+  const name = prompt('Rename session:', title?.textContent || '');
+  if (name === null || !name.trim()) return;
+  await api('PATCH', '/sessions/' + sid, { name: name.trim() });
+  htmx.ajax('GET', '/views/sessions/' + sid + '/activate', { target: '#main-panel', swap: 'innerHTML' });
 }
 
 // --- UI helpers ---
-function showEmptyState() {
-  document.getElementById('main-title').textContent = 'Select a session';
-  document.getElementById('main-meta').textContent = '';
-  document.getElementById('main-actions').innerHTML = '';
-  document.getElementById('empty-state').classList.remove('hidden');
-  document.getElementById('messages-feed').classList.add('hidden');
-  document.getElementById('input-bar').classList.add('hidden');
-}
-
 function showDialog(id) { document.getElementById(id).classList.remove('hidden'); }
 function hideDialog(id) { document.getElementById(id).classList.add('hidden'); }
-
-function permModeLabel(mode) {
-  const map = { default: 'Default', acceptEdits: 'Accept Edits', bypassPermissions: 'Bypass Permissions', plan: 'Plan' };
-  return map[mode] || mode || 'Default';
-}
-
-function shortModel(model) {
-  const map = { opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' };
-  return map[model] || model;
-}
 
 function esc(str) {
   if (!str) return '';
@@ -774,25 +423,15 @@ function esc(str) {
   return d.innerHTML;
 }
 
-// Catch unhandled promise rejections (api errors already show toast, just suppress console noise)
+document.querySelectorAll('.dialog-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.add('hidden'); });
+});
+
 window.addEventListener('unhandledrejection', e => {
   if (e.reason?.message === 'Unauthorized') { e.preventDefault(); return; }
   if (e.reason?.message) showError(e.reason.message);
   e.preventDefault();
 });
-
-// Close dialogs on overlay click
-document.querySelectorAll('.dialog-overlay').forEach(el => {
-  el.addEventListener('click', e => { if (e.target === el) el.classList.add('hidden'); });
-});
-
-// Boot
-if (!apiKey) {
-  promptForApiKey();
-} else {
-  loadWorkspaces();
-}
 </script>
-<div class="toast hidden" id="toast"></div>
 </body>
 </html>

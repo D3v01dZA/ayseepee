@@ -16,6 +16,8 @@ type Handler = (ctx: RouteContext) => Promise<RouteResponse> | RouteResponse;
 export interface RouteResponse {
   status: number;
   body?: unknown;
+  html?: string;
+  headers?: Record<string, string>;
 }
 
 interface Route {
@@ -90,7 +92,7 @@ export class Router {
     const pathname = url.pathname;
     const method = req.method ?? "GET";
 
-    if (pathname.startsWith("/api/") && !this.checkAuth(req)) {
+    if ((pathname.startsWith("/api/") || pathname.startsWith("/views/")) && !this.checkAuth(req)) {
       sendJson(res, 401, { error: "Unauthorized" });
       log(method, pathname, 401, start);
       return;
@@ -113,12 +115,18 @@ export class Router {
 
       let body: unknown = undefined;
       if (method === "POST" || method === "PATCH" || method === "PUT") {
-        body = await parseJsonBody(req);
+        body = await parseBody(req);
       }
 
       try {
         const result = await route.handler({ params, query, body });
-        sendJson(res, result.status, result.body);
+        if (result.html !== undefined) {
+          const hdrs: Record<string, string> = { "Content-Type": "text/html; charset=utf-8", ...(result.headers || {}) };
+          res.writeHead(result.status, hdrs);
+          res.end(result.html);
+        } else {
+          sendJson(res, result.status, result.body);
+        }
         log(method, pathname, result.status, start);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Internal server error";
@@ -155,17 +163,25 @@ export class Router {
   }
 }
 
-function parseJsonBody(req: IncomingMessage): Promise<unknown> {
+function parseBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => chunks.push(chunk));
     req.on("end", () => {
       const raw = Buffer.concat(chunks).toString("utf-8");
       if (!raw) return resolve(undefined);
-      try {
-        resolve(JSON.parse(raw));
-      } catch {
-        reject(new Error("Invalid JSON body"));
+      const contentType = req.headers["content-type"] || "";
+      if (contentType.includes("application/x-www-form-urlencoded")) {
+        const params = new URLSearchParams(raw);
+        const result: Record<string, string> = {};
+        params.forEach((value, key) => { result[key] = value; });
+        resolve(result);
+      } else {
+        try {
+          resolve(JSON.parse(raw));
+        } catch {
+          reject(new Error("Invalid JSON body"));
+        }
       }
     });
     req.on("error", reject);
