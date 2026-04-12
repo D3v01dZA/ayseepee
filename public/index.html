@@ -126,7 +126,7 @@
       <h2>Workspaces <button class="btn btn-sm" onclick="showCreateWorkspace()">+</button></h2>
     </div>
     <ul id="workspace-list" class="sidebar-list"
-        hx-get="/views/workspaces" hx-trigger="load, refresh" hx-swap="outerHTML"></ul>
+        hx-get="/views/init" hx-trigger="load" hx-swap="none"></ul>
     <div class="sidebar-section">
       <h2>Sessions <button class="btn btn-sm" onclick="showCreateSession()">+</button></h2>
     </div>
@@ -240,17 +240,16 @@ document.body.addEventListener('htmx:beforeSwap', (e) => {
 // Auto-scroll messages feed
 document.body.addEventListener('htmx:afterSwap', (e) => {
   const feed = document.getElementById('messages-feed');
-  if (feed && (feed.contains(e.detail.target) || e.detail.target === feed)) {
-    feed.scrollTop = feed.scrollHeight;
-  }
+  if (feed) feed.scrollTop = feed.scrollHeight;
 });
 
-// Track active workspace ID (extracted from htmx request paths)
+// Track active workspace ID from data attribute on workspace list
 let activeWorkspaceId = null;
-document.body.addEventListener('htmx:afterRequest', (e) => {
-  const path = e.detail.pathInfo?.requestPath || '';
-  const wsMatch = path.match(/\/views\/workspaces\/([^/]+)\/activate/);
-  if (wsMatch) activeWorkspaceId = wsMatch[1];
+document.body.addEventListener('htmx:afterSwap', (e) => {
+  const wsList = document.getElementById('workspace-list');
+  if (wsList?.dataset.activeWorkspace) {
+    activeWorkspaceId = wsList.dataset.activeWorkspace;
+  }
 });
 
 // --- API helper (for dialog-based creates/deletes) ---

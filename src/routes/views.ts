@@ -15,6 +15,7 @@ function esc(s: string | null | undefined): string {
 
 // --- Route registration ---
 export function registerViewRoutes(router: Router): void {
+  router.get("/views/init", initView);
   router.get("/views/workspaces", listWorkspacesView);
   router.get("/views/workspaces/:wid/activate", activateWorkspaceView);
   router.get("/views/sessions/:sid/activate", activateSessionView);
@@ -28,6 +29,7 @@ export function registerViewRoutes(router: Router): void {
 
 function renderWorkspaceList(workspaces: WorkspaceRow[], activeId?: string, oob = false): string {
   const oobAttr = oob ? ` hx-swap-oob="outerHTML"` : "";
+  const activeAttr = activeId ? ` data-active-workspace="${activeId}"` : "";
   const items = workspaces.length === 0
     ? `<li style="color:var(--text-dim);padding:8px 12px;font-size:13px">No workspaces yet</li>`
     : workspaces.map(w => `
@@ -37,7 +39,7 @@ function renderWorkspaceList(workspaces: WorkspaceRow[], activeId?: string, oob 
         <span>${esc(w.name)}</span>
         <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteWorkspace('${w.id}')">&times;</button>
       </li>`).join("");
-  return `<ul id="workspace-list" class="sidebar-list"${oobAttr}>${items}</ul>`;
+  return `<ul id="workspace-list" class="sidebar-list"${oobAttr}${activeAttr}>${items}</ul>`;
 }
 
 function renderSessionList(sessions: SessionRow[], activeId?: string, oob = false): string {
@@ -88,6 +90,30 @@ function renderSessionHeader(session: SessionRow, workspace: WorkspaceRow, oob =
       <button class="btn btn-sm btn-danger" onclick="deleteSession('${session.id}')">Delete</button>
     </div>
   </div>`;
+}
+
+function renderFullSession(
+  workspaces: WorkspaceRow[], workspace: WorkspaceRow,
+  sessions: SessionRow[], session: SessionRow,
+): string {
+  const messages = Messages.listMessages(session.id);
+  const renderedMessages = messages.map(m => {
+    const events = Messages.getAllMessageEvents(m.id);
+    return renderMessageGroup(m, events);
+  }).join("");
+  const emptyMsg = messages.length === 0
+    ? `<div id="empty-messages" style="color:var(--text-dim);text-align:center;margin-top:40px;font-size:13px">No messages yet. Send a prompt to begin.</div>`
+    : "";
+
+  return [
+    renderSessionList(sessions, session.id),
+    renderWorkspaceList(workspaces, workspace.id, true),
+    `<div id="main-panel" class="main" hx-swap-oob="innerHTML">
+      ${renderSessionHeader(session, workspace)}
+      <div class="messages" id="messages-feed">${emptyMsg}${renderedMessages}</div>
+      ${renderInputBar(session.id)}
+    </div>`,
+  ].join("\n");
 }
 
 function renderInputBar(sessionId: string): string {
@@ -241,20 +267,85 @@ function formatToolInput(input: unknown): string {
 
 // --- Route handlers ---
 
+function initView() {
+  const workspaces = Workspaces.listWorkspaces();
+  if (workspaces.length === 0) {
+    return {
+      status: 200,
+      html: renderWorkspaceList(workspaces, undefined, true),
+    };
+  }
+
+  // Find the most recently active session across all workspaces
+  const lastSession = Sessions.getMostRecentlyActive();
+  const workspace = lastSession
+    ? Workspaces.getWorkspace(lastSession.workspace_id) ?? workspaces[0]
+    : workspaces[0];
+  const sessions = Sessions.listSessions(workspace.id);
+
+  if (!lastSession || sessions.length === 0) {
+    return {
+      status: 200,
+      html: [
+        renderWorkspaceList(workspaces, workspace.id, true),
+        renderSessionList(sessions, undefined, true),
+        `<div id="main-panel" class="main" hx-swap-oob="innerHTML">
+          <div class="main-header"><h2>Select a session</h2></div>
+          <div class="main-empty">Create a session to get started</div>
+        </div>`,
+      ].join("\n"),
+    };
+  }
+
+  // Select that session (it may be in this workspace's list)
+  const session = sessions.find(s => s.id === lastSession.id) ?? sessions[0];
+  const messages = Messages.listMessages(session.id);
+  const renderedMessages = messages.map(m => {
+    const events = Messages.getAllMessageEvents(m.id);
+    return renderMessageGroup(m, events);
+  }).join("");
+  const emptyMsg = messages.length === 0
+    ? `<div id="empty-messages" style="color:var(--text-dim);text-align:center;margin-top:40px;font-size:13px">No messages yet. Send a prompt to begin.</div>`
+    : "";
+
+  return {
+    status: 200,
+    html: [
+      renderWorkspaceList(workspaces, workspace.id, true),
+      renderSessionList(sessions, session.id, true),
+      `<div id="main-panel" class="main" hx-swap-oob="innerHTML">
+        ${renderSessionHeader(session, workspace)}
+        <div class="messages" id="messages-feed">${emptyMsg}${renderedMessages}</div>
+        ${renderInputBar(session.id)}
+      </div>`,
+    ].join("\n"),
+  };
+}
+
 function listWorkspacesView() {
   return { status: 200, html: renderWorkspaceList(Workspaces.listWorkspaces()) };
 }
 
 function activateWorkspaceView(ctx: RouteContext) {
   const { wid } = ctx.params;
+  const workspace = Workspaces.getWorkspace(wid);
+  if (!workspace) return { status: 404, html: "" };
+
+  const sessions = Sessions.listSessions(wid);
+
+  if (sessions.length > 0) {
+    const session = sessions[0];
+    return { status: 200, html: renderFullSession(Workspaces.listWorkspaces(), workspace, sessions, session) };
+  }
+
   return {
     status: 200,
     html: [
-      renderSessionList(Sessions.listSessions(wid)),
+      renderSessionList(sessions),
       renderWorkspaceList(Workspaces.listWorkspaces(), wid, true),
       `<div id="main-panel" class="main" hx-swap-oob="innerHTML">
         <div class="main-header"><h2>Select a session</h2></div>
-        <div class="main-empty">Select a session to start chatting</div>
+        <div class="main-empty">Create a session to get started</div>
       </div>`,
     ].join("\n"),
   };

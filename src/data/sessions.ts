@@ -59,6 +59,12 @@ export function autoNameSession(id: string, prompt: string): void {
   getDb().prepare("UPDATE sessions SET name = ? WHERE id = ?").run(name, id);
 }
 
+export function getMostRecentlyActive(): SessionRow | undefined {
+  return getDb()
+    .prepare("SELECT * FROM sessions ORDER BY last_active_at DESC LIMIT 1")
+    .get() as SessionRow | undefined;
+}
+
 export function getActiveMessageIds(sessionId: string): string[] {
   const rows = getDb()
     .prepare("SELECT id FROM messages WHERE session_id = ? AND status IN ('pending', 'streaming')")
