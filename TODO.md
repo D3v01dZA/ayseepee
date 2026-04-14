@@ -11,8 +11,10 @@
 - [x] Make mobile friendly with hamburger menu
 - [ ] File explorer
 - [ ] Diff viewer 
-- [ ] Allowed tools whitelisting in execute dialog
+- [x] Allowed tools whitelisting in execute dialog
 - [ ] File upload/download
+- [ ] Formatting of responses. ``` should be a code block?
+- [ ] Show context window usage?
 
 ## Misc
 - [ ] Use https://github.com/JuliusBrussee/caveman
@@ -20,3 +22,4 @@
 - [ ] Message queueing?
 - [ ] Message interrupt?
 - [ ] Tool interrupting seems to break everything?
+- [ ] Make sure the API and Views can do the same "stuff"

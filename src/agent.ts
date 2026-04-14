@@ -206,13 +206,17 @@ export function runQuery(params: RunQueryParams): void {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       log("query:error", messageId, { error: errorMessage });
-      db.prepare("UPDATE messages SET status = 'error', error = ?, completed_at = datetime('now') WHERE id = ?").run(
-        errorMessage,
-        messageId
-      );
-      db.prepare("UPDATE sessions SET status = 'idle', last_active_at = datetime('now') WHERE id = ?").run(
-        sessionId
-      );
+      // Skip if already marked as error/complete (e.g. by interrupt handler)
+      const current = db.prepare("SELECT status FROM messages WHERE id = ?").get(messageId) as { status: string } | undefined;
+      if (current && current.status !== "error" && current.status !== "complete") {
+        db.prepare("UPDATE messages SET status = 'error', error = ?, completed_at = datetime('now') WHERE id = ?").run(
+          errorMessage,
+          messageId
+        );
+        db.prepare("UPDATE sessions SET status = 'idle', last_active_at = datetime('now') WHERE id = ?").run(
+          sessionId
+        );
+      }
     } finally {
       activeQueries.delete(messageId);
     }

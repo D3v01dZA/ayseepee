@@ -1,5 +1,5 @@
 import { Router, type RouteContext } from "../router.js";
-import { runQuery } from "../agent.js";
+import { runQuery, interruptQuery } from "../agent.js";
 import * as Settings from "../data/settings.js";
 import * as Workspaces from "../data/workspaces.js";
 import * as Sessions from "../data/sessions.js";
@@ -24,6 +24,8 @@ export function registerViewRoutes(router: Router): void {
   router.get("/views/sessions/:sid/activate", activateSessionView);
   router.get("/views/poll-message/:mid", pollMessageView);
   router.post("/views/sessions/:sid/messages", sendMessageView);
+  router.post("/views/sessions/:sid/interrupt", interruptSessionView);
+  router.get("/views/sessions/:sid/input-bar", inputBarView);
   router.post("/views/permissions/:id/resolve", resolvePermissionView);
   router.post("/views/permissions/:id/always-allow", alwaysAllowView);
 }
@@ -104,14 +106,21 @@ function renderFullSession(
   ].join("\n");
 }
 
-function renderInputBar(sessionId: string): string {
-  return `<form class="input-bar" id="input-bar"
-      hx-post="/views/sessions/${sessionId}/messages"
-      hx-target="#messages-feed" hx-swap="beforeend"
-      hx-on::after-request="if(event.detail.successful){this.querySelector('input[name=prompt]').value='';var e=document.getElementById('empty-messages');if(e)e.remove();var f=document.getElementById('messages-feed');if(f)f.scrollTop=f.scrollHeight;}">
-    <input type="text" name="prompt" placeholder="Send a message..." autocomplete="off">
-    <button type="submit" class="btn btn-primary">Send</button>
-  </form>`;
+function renderInputBar(sessionId: string, oob = false): string {
+  const session = Sessions.getSession(sessionId);
+  const oobAttr = oob ? ` hx-swap-oob="outerHTML"` : "";
+
+  return `<div id="input-bar-wrapper"${oobAttr} data-session-id="${sessionId}" data-session-status="${session?.status || "idle"}">
+    <div id="queue-list"></div>
+    <form class="input-bar" id="input-bar"
+        hx-post="/views/sessions/${sessionId}/messages"
+        hx-target="#messages-feed" hx-swap="beforeend"
+        hx-on::after-request="onMessageSent(event)">
+      <button type="button" class="btn btn-stop hidden" id="stop-btn" title="Stop" onclick="interruptSession('${sessionId}')">&#9632;</button>
+      <input type="text" name="prompt" placeholder="Send a message..." autocomplete="off">
+      <button type="submit" class="btn btn-primary">Send</button>
+    </form>
+  </div>`;
 }
 
 function renderMessageGroup(message: MessageRow, events: MessageEventRow[]): string {
@@ -146,8 +155,20 @@ function renderEvents(message: MessageRow, events: MessageEventRow[]): string {
 
   const rendered = events.map(e => renderEvent(e, message.id)).join("");
 
+  if (message.status === "error") {
+    const errText = message.error || "Error";
+    return rendered + `<div class="event"><div class="event-result error">${esc(errText)}</div></div>`;
+  }
+
   if (isActive) {
-    return rendered + `<div class="event"><span class="event-type">streaming...</span></div>`;
+    const hasPendingPerm = events.some(e => {
+      if (e.event_type !== "permission_request") return false;
+      const d = JSON.parse(e.data);
+      const status = Messages.getPermissionStatus(d.id);
+      return !status || status === "pending";
+    });
+    const label = hasPendingPerm ? "waiting for permission..." : "streaming...";
+    return rendered + `<div class="event"><span class="event-type">${label}</span></div>`;
   }
   return rendered;
 }
@@ -621,6 +642,40 @@ function alwaysAllowView(ctx: RouteContext) {
 
   // Return full message group so polling resumes
   return { status: 200, html: renderFullMessageGroup(row.message_id) };
+}
+
+function interruptSessionView(ctx: RouteContext) {
+  const { sid } = ctx.params;
+  const session = Sessions.getSession(sid);
+  if (!session) return { status: 404, html: "" };
+
+  // Interrupt active messages — abort the query and update DB immediately
+  const activeIds = Sessions.getActiveMessageIds(sid);
+  for (const mid of activeIds) {
+    interruptQuery(mid);
+    Messages.interruptMessage(mid);
+  }
+
+  // Return updated input bar + OOB message groups and session list
+  let html = renderInputBar(sid);
+  for (const mid of activeIds) {
+    const msg = Messages.getMessage(mid);
+    if (msg) {
+      const evts = Messages.getAllMessageEvents(mid);
+      const msgHtml = renderMessageGroup(msg, evts);
+      if (msgHtml) {
+        html += msgHtml.replace(`id="msg-${mid}"`, `id="msg-${mid}" hx-swap-oob="outerHTML"`);
+      }
+    }
+  }
+  html += renderSessionList(Sessions.listSessions(session.workspace_id), sid, true);
+
+  return { status: 200, html };
+}
+
+function inputBarView(ctx: RouteContext) {
+  const { sid } = ctx.params;
+  return { status: 200, html: renderInputBar(sid) };
 }
 
 function renderFullMessageGroup(messageId: string): string {

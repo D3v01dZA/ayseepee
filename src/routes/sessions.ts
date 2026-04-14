@@ -115,13 +115,13 @@ function sendMessage(ctx: RouteContext) {
   const session = Sessions.getSession(sessionId);
   if (!session) return { status: 404, body: { error: "Session not found" } };
 
-  if (session.status === "active") {
-    return { status: 409, body: { error: "Session has an active query. Interrupt it first or wait." } };
-  }
-
   const body = ctx.body as Partial<SendMessageBody> | undefined;
   if (!body?.prompt) {
     return { status: 400, body: { error: "prompt is required" } };
+  }
+
+  if (session.status === "active") {
+    return { status: 409, body: { error: "Session has an active query. Interrupt it first or wait." } };
   }
 
   const workspace = Workspaces.getWorkspace(session.workspace_id);

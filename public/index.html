@@ -84,10 +84,22 @@
   .message-status { display: inline-block; font-size: 11px; font-family: var(--mono); padding: 1px 6px; border-radius: 4px; margin-left: 8px; }
 
   /* Input bar */
-  .input-bar { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+  #input-bar-wrapper { border-top: 1px solid var(--border); }
+  .input-bar { padding: 12px 20px; display: flex; gap: 8px; align-items: center; }
   .input-bar input { flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 13px; outline: none; }
   .input-bar input:focus { border-color: var(--accent); }
   .input-bar input::placeholder { color: var(--text-dim); }
+
+  /* Stop button */
+  .btn-stop { background: var(--red); color: #fff; border: none; width: 32px; height: 32px; border-radius: 6px; font-size: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; padding: 0; }
+  .btn-stop:hover { background: #da3633; }
+
+  /* Queued messages */
+  #queue-list:not(:empty) { padding: 6px 20px 0; display: flex; flex-direction: column; gap: 4px; }
+  .queued-message { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: rgba(210,153,34,0.08); border: 1px solid rgba(210,153,34,0.15); border-radius: 6px; font-size: 12px; }
+  .queued-text { flex: 1; color: var(--text-dim); font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .queued-message .btn { padding: 0 4px; font-size: 12px; line-height: 1; }
+  .queued-message .btn-danger { font-size: 14px; }
 
   /* Dialogs */
   .dialog-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
@@ -340,14 +352,28 @@ document.body.addEventListener('htmx:configRequest', (e) => {
   e.detail.headers['Authorization'] = 'Bearer ' + apiKey;
 });
 
-// Handle HTTP errors
+// Intercept form submission — queue if there are already queued messages or drain in flight
+document.body.addEventListener('htmx:beforeRequest', (e) => {
+  if (e.detail.elt.id === 'input-bar') {
+    const input = e.detail.elt.querySelector('input[name=prompt]');
+    const prompt = input?.value?.trim();
+    if (prompt && (messageQueue.length > 0 || _draining)) {
+      e.preventDefault();
+      queueMessage(prompt);
+    }
+  }
+});
+
+// Handle HTTP errors — 409 means session active, queue on client
 document.body.addEventListener('htmx:beforeSwap', (e) => {
   if (e.detail.xhr.status === 401) {
     e.detail.shouldSwap = false;
     promptForApiKey('Invalid API key.');
   } else if (e.detail.xhr.status === 409) {
     e.detail.shouldSwap = false;
-    showError('Session has an active query. Wait or interrupt it.');
+    const params = e.detail.requestConfig.parameters;
+    const prompt = params?.prompt || (typeof params === 'string' ? new URLSearchParams(params).get('prompt') : null);
+    if (prompt) queueMessage(prompt);
   } else if (e.detail.xhr.status >= 400) {
     e.detail.shouldSwap = false;
     showError('Request failed (' + e.detail.xhr.status + ')');
@@ -361,6 +387,12 @@ document.body.addEventListener('htmx:afterSwap', (e) => {
   closeSidebar();
 });
 
+// After every swap, sync client UI: stop button, queue, drain
+document.body.addEventListener('htmx:afterSettle', () => {
+  syncInputBar();
+  drainQueue();
+});
+
 // Track active workspace ID from data attribute on workspace list
 let activeWorkspaceId = null;
 document.body.addEventListener('htmx:afterSwap', (e) => {
@@ -369,6 +401,119 @@ document.body.addEventListener('htmx:afterSwap', (e) => {
     activeWorkspaceId = wsList.dataset.activeWorkspace;
   }
 });
+
+// --- Client-side message queue ---
+const messageQueue = [];
+
+function isSessionActive() {
+  // Check session list for an "active" status badge on the current session
+  const activeItem = document.querySelector('#session-list .sidebar-item.active .status-active');
+  return !!activeItem;
+}
+
+function syncInputBar() {
+  const stop = document.getElementById('stop-btn');
+  if (stop) {
+    if (isSessionActive()) stop.classList.remove('hidden');
+    else stop.classList.add('hidden');
+  }
+  renderQueue();
+}
+
+function queueMessage(prompt) {
+  messageQueue.push(prompt);
+  syncInputBar();
+  const input = document.querySelector('#input-bar input[name=prompt]');
+  if (input) { input.value = ''; input.focus(); }
+}
+
+function cancelQueued(index) {
+  messageQueue.splice(index, 1);
+  renderQueue();
+}
+
+function clearQueue() {
+  messageQueue.length = 0;
+  renderQueue();
+}
+
+function renderQueue() {
+  const el = document.getElementById('queue-list');
+  if (!el) return;
+  if (messageQueue.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = messageQueue.map((prompt, i) => {
+    const text = prompt.length > 80 ? esc(prompt.slice(0, 77)) + '...' : esc(prompt);
+    return '<div class="queued-message">' +
+      '<span class="queued-text">' + text + '</span>' +
+      '<button class="btn btn-sm" onclick="sendQueued(' + i + ')" title="Interrupt and send now">&#9654;</button>' +
+      '<button class="btn btn-sm btn-danger" onclick="cancelQueued(' + i + ')">&times;</button>' +
+      '</div>';
+  }).join('');
+}
+
+function sendQueued(index) {
+  const prompt = messageQueue.splice(index, 1)[0];
+  if (!prompt) return;
+  messageQueue.unshift(prompt);
+  renderQueue();
+  const wrapper = document.getElementById('input-bar-wrapper');
+  const sid = wrapper?.dataset.sessionId;
+  if (sid) interruptSession(sid, true);
+}
+
+let _draining = false;
+function drainQueue() {
+  if (_draining) return;
+  if (messageQueue.length === 0) return;
+  if (isSessionActive()) return;
+  _draining = true;
+  const prompt = messageQueue.shift();
+  renderQueue();
+  const wrapper = document.getElementById('input-bar-wrapper');
+  const sid = wrapper?.dataset.sessionId;
+  if (!sid) { _draining = false; return; }
+  htmx.ajax('POST', '/views/sessions/' + sid + '/messages', {
+    target: '#messages-feed',
+    swap: 'beforeend',
+    values: { prompt: prompt },
+  }).then(() => {
+    _draining = false;
+    var e = document.getElementById('empty-messages');
+    if (e) e.remove();
+    var f = document.getElementById('messages-feed');
+    if (f) f.scrollTop = f.scrollHeight;
+  }).catch(() => {
+    _draining = false;
+    // Re-queue at the front if it failed
+    messageQueue.unshift(prompt);
+    renderQueue();
+  });
+}
+
+function onMessageSent(event) {
+  const status = event.detail.xhr?.status;
+  if (status === 409) {
+    const input = event.detail.elt.querySelector('input[name=prompt]');
+    if (input) { input.value = ''; input.focus(); }
+    return;
+  }
+  if (!event.detail.successful) return;
+  const form = event.detail.elt;
+  const input = form.querySelector('input[name=prompt]');
+  if (input) { input.value = ''; input.focus(); }
+  var e = document.getElementById('empty-messages');
+  if (e) e.remove();
+  var f = document.getElementById('messages-feed');
+  if (f) f.scrollTop = f.scrollHeight;
+}
+
+function interruptSession(sid, keepQueue) {
+  if (!keepQueue) clearQueue();
+  htmx.ajax('POST', '/views/sessions/' + sid + '/interrupt', {
+    target: '#input-bar-wrapper',
+    swap: 'outerHTML',
+  });
+}
 
 // --- API helper (for dialog-based creates/deletes) ---
 async function api(method, path, body) {
