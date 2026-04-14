@@ -1,5 +1,6 @@
 import { Router, type RouteContext } from "../router.js";
 import { runQuery, interruptQuery } from "../agent.js";
+import { marked } from "marked";
 import * as Settings from "../data/settings.js";
 import * as Workspaces from "../data/workspaces.js";
 import * as Sessions from "../data/sessions.js";
@@ -7,6 +8,8 @@ import * as Messages from "../data/messages.js";
 import type {
   WorkspaceRow, SessionRow, MessageRow, MessageEventRow, PermissionRequestRow,
 } from "../types.js";
+
+marked.setOptions({ breaks: true, gfm: true });
 
 // --- HTML escape ---
 function esc(s: string | null | undefined): string {
@@ -26,6 +29,7 @@ export function registerViewRoutes(router: Router): void {
   router.post("/views/sessions/:sid/messages", sendMessageView);
   router.post("/views/sessions/:sid/interrupt", interruptSessionView);
   router.get("/views/sessions/:sid/input-bar", inputBarView);
+  router.get("/views/sessions/:sid/check-messages", checkMessagesView);
   router.post("/views/permissions/:id/resolve", resolvePermissionView);
   router.post("/views/permissions/:id/always-allow", alwaysAllowView);
 }
@@ -182,7 +186,7 @@ function renderEvent(e: MessageEventRow, messageId: string): string {
     const content = data.message?.content || [];
     for (const block of content) {
       if (block.type === "text" && block.text?.trim()) {
-        parts.push(`<div class="event-assistant">${esc(block.text.trim())}</div>`);
+        parts.push(`<div class="event-assistant">${renderMarkdown(block.text.trim())}</div>`);
       } else if (block.type === "tool_use") {
         parts.push(`<div class="event-tool-use">
           <span class="tool-name">${esc(block.name)}</span>
@@ -249,6 +253,10 @@ function permModeLabel(mode: string): string {
 function shortModel(model: string): string {
   const map: Record<string, string> = { opus: "Opus", sonnet: "Sonnet", haiku: "Haiku" };
   return map[model] || model;
+}
+
+function renderMarkdown(text: string): string {
+  return marked.parse(text) as string;
 }
 
 function formatToolResult(result: unknown): string {
@@ -671,6 +679,21 @@ function interruptSessionView(ctx: RouteContext) {
   html += renderSessionList(Sessions.listSessions(session.workspace_id), sid, true);
 
   return { status: 200, html };
+}
+
+function checkMessagesView(ctx: RouteContext) {
+  const { sid } = ctx.params;
+  const session = Sessions.getSession(sid);
+  if (!session) return { status: 404, html: "" };
+
+  const messages = Messages.listMessages(sid);
+  const html = messages.map(m => {
+    const events = Messages.getAllMessageEvents(m.id);
+    return renderMessageGroup(m, events);
+  }).join("") || `<div id="empty-messages" style="color:var(--text-dim);text-align:center;margin-top:40px;font-size:13px">No messages yet. Send a prompt to begin.</div>`;
+
+  // Also sync session list status
+  return { status: 200, html: html + renderSessionList(Sessions.listSessions(session.workspace_id), sid, true) };
 }
 
 function inputBarView(ctx: RouteContext) {

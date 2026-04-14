@@ -13,7 +13,7 @@
 - [ ] Diff viewer 
 - [x] Allowed tools whitelisting in execute dialog
 - [ ] File upload/download
-- [ ] Formatting of responses. ``` should be a code block?
+- [x] Formatting of responses. ``` should be a code block?
 - [ ] Show context window usage?
 
 ## Misc
@@ -22,5 +22,4 @@
 - [x] Message queueing?
 - [x] Message interrupt?
 - [x] Clean up stale queries on startup
-- [ ] Tool interrupting seems to break everything?
 - [ ] Make sure the API and Views can do the same "stuff"

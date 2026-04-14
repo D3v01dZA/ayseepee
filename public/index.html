@@ -64,7 +64,22 @@
   .message-events { margin-left: 12px; border-left: 2px solid var(--border); padding-left: 12px; }
   .event { margin-bottom: 6px; font-size: 13px; }
   .event-type { font-family: var(--mono); font-size: 11px; color: var(--text-dim); background: rgba(255,255,255,0.04); padding: 1px 6px; border-radius: 4px; display: inline-block; margin-bottom: 2px; }
-  .event-assistant { white-space: pre-wrap; font-family: var(--mono); font-size: 12px; line-height: 1.6; }
+  .event-assistant { font-size: 13px; line-height: 1.6; }
+  .event-assistant p { margin: 0 0 8px; }
+  .event-assistant p:last-child { margin-bottom: 0; }
+  .event-assistant code { font-family: var(--mono); font-size: 12px; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px; }
+  .event-assistant pre { background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; position: relative; }
+  .event-assistant pre code { background: none; padding: 0; font-size: 12px; line-height: 1.5; }
+  .copy-btn { position: absolute; top: 4px; right: 4px; background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); padding: 2px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; }
+  .copy-btn:hover { color: var(--text); border-color: var(--border-light); }
+  .event-assistant ul, .event-assistant ol { margin: 4px 0 8px 20px; }
+  .event-assistant li { margin-bottom: 2px; }
+  .event-assistant h1, .event-assistant h2, .event-assistant h3 { font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
+  .event-assistant blockquote { border-left: 3px solid var(--border); padding-left: 10px; color: var(--text-dim); margin: 8px 0; }
+  .event-assistant a { color: var(--accent); }
+  .event-assistant table { border-collapse: collapse; margin: 8px 0; font-size: 12px; }
+  .event-assistant th, .event-assistant td { border: 1px solid var(--border); padding: 4px 8px; }
+  .event-assistant th { background: rgba(255,255,255,0.04); }
   .event-tool { font-family: var(--mono); font-size: 12px; color: var(--yellow); }
   .event-result { padding: 8px 12px; background: rgba(63,185,80,0.06); border: 1px solid rgba(63,185,80,0.1); border-radius: 6px; font-size: 12px; }
   .event-result.error { background: rgba(248,81,73,0.06); border-color: rgba(248,81,73,0.1); }
@@ -828,6 +843,35 @@ function esc(str) {
   d.textContent = str;
   return d.innerHTML;
 }
+
+// Inject copy buttons into code blocks
+function addCopyButtons() {
+  document.querySelectorAll('.event-assistant pre').forEach(pre => {
+    if (pre.querySelector('.copy-btn')) return;
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = 'Copy';
+    btn.onclick = () => {
+      const code = pre.querySelector('code');
+      navigator.clipboard.writeText((code || pre).textContent).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 1500);
+      });
+    };
+    pre.appendChild(btn);
+  });
+}
+document.body.addEventListener('htmx:afterSettle', addCopyButtons);
+addCopyButtons();
+
+// Background poll: check for new messages every 30s if no active message polling
+setInterval(() => {
+  if (document.querySelector('.message-group[hx-get]')) return;
+  const wrapper = document.getElementById('input-bar-wrapper');
+  const sid = wrapper?.dataset.sessionId;
+  if (!sid) return;
+  htmx.ajax('GET', '/views/sessions/' + sid + '/check-messages', { target: '#messages-feed', swap: 'innerHTML' });
+}, 30000);
 
 document.querySelectorAll('.dialog-overlay').forEach(el => {
   el.addEventListener('click', e => { if (e.target === el) el.classList.add('hidden'); });
