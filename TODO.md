@@ -14,7 +14,7 @@
 - [x] Allowed tools whitelisting in execute dialog
 - [ ] File upload/download
 - [x] Formatting of responses. ``` should be a code block?
-- [ ] Show context window usage?
+- [x] Show context window usage?
 
 ## Misc
 - [ ] Use https://github.com/JuliusBrussee/caveman

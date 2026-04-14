@@ -217,11 +217,24 @@ function renderEvent(e: MessageEventRow, messageId: string): string {
   if (e.event_type.startsWith("result")) {
     const isError = data.is_error;
     const model = data.modelUsage ? Object.keys(data.modelUsage)[0] : null;
+    const usage = model && data.modelUsage ? data.modelUsage[model] : null;
     const modelTag = model ? `<span class="event-model">${esc(shortModel(model))}</span> ` : "";
     const errorText = isError && data.error ? esc(data.error) : "";
+
+    const parts: string[] = [];
+    if (model) parts.push(shortModel(model));
+    if (usage) {
+      const used = (usage.inputTokens || 0) + (usage.outputTokens || 0);
+      const total = usage.contextWindow || 0;
+      if (total) parts.push(`${used.toLocaleString()} / ${total.toLocaleString()} tokens`);
+      else if (used) parts.push(`${used.toLocaleString()} tokens`);
+    }
+    if (data.total_cost_usd) parts.push(`$${data.total_cost_usd.toFixed(4)}`);
+    if (data.duration_ms) parts.push(`${(data.duration_ms / 1000).toFixed(1)}s`);
+
     return `<div class="event"><div class="event-result ${isError ? "error" : ""}">
       ${errorText}
-      <div class="cost">${modelTag}${data.total_cost_usd ? "$" + data.total_cost_usd.toFixed(4) : ""} ${data.duration_ms ? (data.duration_ms / 1000).toFixed(1) + "s" : ""}</div>
+      <div class="cost">${parts.join(" · ")}</div>
     </div></div>`;
   }
 
