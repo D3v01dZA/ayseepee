@@ -1,6 +1,8 @@
 import { Router, type RouteContext } from "../router.js";
 import { runQuery, interruptQuery } from "../agent.js";
 import { marked } from "marked";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import * as Settings from "../data/settings.js";
 import * as Workspaces from "../data/workspaces.js";
 import * as Sessions from "../data/sessions.js";
@@ -8,6 +10,8 @@ import * as Messages from "../data/messages.js";
 import type {
   WorkspaceRow, SessionRow, MessageRow, MessageEventRow, PermissionRequestRow,
 } from "../types.js";
+
+const execAsync = promisify(exec);
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -32,6 +36,10 @@ export function registerViewRoutes(router: Router): void {
   router.get("/views/sessions/:sid/check-messages", checkMessagesView);
   router.post("/views/permissions/:id/resolve", resolvePermissionView);
   router.post("/views/permissions/:id/always-allow", alwaysAllowView);
+  router.get("/views/sessions/:sid/git-diff", gitDiffView);
+  router.get("/views/sessions/:sid/changes", sessionChangesView);
+  router.get("/views/sessions/:sid/files", fileBrowserView);
+  router.get("/views/sessions/:sid/file-content", fileContentView);
 }
 
 // --- Render helpers ---
@@ -82,7 +90,12 @@ function renderSessionHeader(session: SessionRow, workspace: WorkspaceRow, oob =
       <h2 id="main-title" onclick="renameSession('${session.id}')" style="cursor:pointer" title="Click to rename">${esc(session.name || session.id.slice(0, 8))}</h2>
       <div class="meta">${esc(workspace.cwd)}</div>
     </div>
-    <div class="meta">${esc(shortModel(resolved.model))} · ${esc(permModeLabel(resolved.permissionMode))}</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="btn btn-sm" onclick="showFileBrowser('${session.id}')" title="Browse files">Files</button>
+      <button class="btn btn-sm" onclick="showSessionChanges('${session.id}')" title="All changes this session">Changes</button>
+      <button class="btn btn-sm" onclick="showGitDiff('${session.id}')" title="Git diff">Diff</button>
+      <span class="meta">${esc(shortModel(resolved.model))} · ${esc(permModeLabel(resolved.permissionMode))}</span>
+    </div>
   </div>`;
 }
 
@@ -139,29 +152,41 @@ function renderMessageGroup(message: MessageRow, events: MessageEventRow[]): str
   const pollAttr = isActive && !hasPendingPerm
     ? ` hx-get="/views/poll-message/${message.id}" hx-trigger="every 1s" hx-swap="outerHTML"`
     : "";
+
+  const failedToolIds = collectFailedToolIds(events);
+
   return `<div class="message-group" id="msg-${message.id}"${pollAttr}>
     <div class="message-prompt">
       <div class="label">You</div>
       ${esc(message.prompt)}
     </div>
     <div class="message-events">
-      ${renderEvents(message, events)}
+      ${renderEvents(message, events, failedToolIds)}
     </div>
   </div>`;
 }
 
-function renderEvents(message: MessageRow, events: MessageEventRow[]): string {
+function renderEvents(message: MessageRow, events: MessageEventRow[], failedToolIds = new Set<string>()): string {
   const isActive = message.status === "pending" || message.status === "streaming";
 
   if (events.length === 0) {
     return isActive ? `<div class="event"><span class="event-type">waiting...</span></div>` : "";
   }
 
-  const rendered = events.map(e => renderEvent(e, message.id)).join("");
+  // Render non-result events, then files section, then result event
+  const resultEvents: MessageEventRow[] = [];
+  const otherEvents: MessageEventRow[] = [];
+  for (const e of events) {
+    if (e.event_type.startsWith("result")) resultEvents.push(e);
+    else otherEvents.push(e);
+  }
+
+  const rendered = otherEvents.map(e => renderEvent(e, message.id, failedToolIds)).join("");
+  const resultRendered = resultEvents.map(e => renderEvent(e, message.id, failedToolIds)).join("");
 
   if (message.status === "error") {
     const errText = message.error || "Error";
-    return rendered + `<div class="event"><div class="event-result error">${esc(errText)}</div></div>`;
+    return rendered +`<div class="event"><div class="event-result error">${esc(errText)}</div></div>`;
   }
 
   if (isActive) {
@@ -172,12 +197,12 @@ function renderEvents(message: MessageRow, events: MessageEventRow[]): string {
       return !status || status === "pending";
     });
     const label = hasPendingPerm ? "waiting for permission..." : "streaming...";
-    return rendered + `<div class="event"><span class="event-type">${label}</span></div>`;
+    return rendered +`<div class="event"><span class="event-type">${label}</span></div>`;
   }
-  return rendered;
+  return rendered +resultRendered;
 }
 
-function renderEvent(e: MessageEventRow, messageId: string): string {
+function renderEvent(e: MessageEventRow, messageId: string, failedToolIds = new Set<string>()): string {
   const data = JSON.parse(e.data);
 
   // Assistant message
@@ -188,10 +213,7 @@ function renderEvent(e: MessageEventRow, messageId: string): string {
       if (block.type === "text" && block.text?.trim()) {
         parts.push(`<div class="event-assistant">${renderMarkdown(block.text.trim())}</div>`);
       } else if (block.type === "tool_use") {
-        parts.push(`<div class="event-tool-use">
-          <span class="tool-name">${esc(block.name)}</span>
-          <div class="tool-input">${esc(formatToolInput(block.input))}</div>
-        </div>`);
+        parts.push(renderToolUse(block, failedToolIds));
       }
     }
     return parts.length ? `<div class="event">${parts.join("")}</div>` : "";
@@ -238,8 +260,12 @@ function renderEvent(e: MessageEventRow, messageId: string): string {
     </div></div>`;
   }
 
-  // Tool result
+  // Tool result — skip if the tool_use was denied/failed
   if (data.type === "user" && data.tool_use_result !== undefined) {
+    const content = data.message?.content || [];
+    const isError = content.some((b: { type: string; is_error?: boolean; tool_use_id?: string }) =>
+      b.type === "tool_result" && b.is_error && b.tool_use_id && failedToolIds.has(b.tool_use_id));
+    if (isError) return "";
     const result = formatToolResult(data.tool_use_result);
     if (!result) return "";
     return `<div class="event"><div class="event-tool-result">${esc(result)}</div></div>`;
@@ -277,6 +303,12 @@ function formatToolResult(result: unknown): string {
   if (typeof result === "string") return result;
   if (typeof result === "object" && result !== null) {
     const obj = result as Record<string, unknown>;
+    if ("structuredPatch" in obj || ("filePath" in obj && ("oldString" in obj || "newString" in obj))) {
+      return "";
+    }
+    if ("file" in obj && typeof obj.file === "object" && obj.file !== null && "filePath" in (obj.file as Record<string, unknown>)) {
+      return "";
+    }
     if ("stdout" in obj || "stderr" in obj) {
       const parts: string[] = [];
       if (obj.stdout) parts.push(String(obj.stdout));
@@ -288,6 +320,42 @@ function formatToolResult(result: unknown): string {
     return result.map((r: Record<string, unknown>) => r.text || r.content || JSON.stringify(r)).join("\n");
   }
   return JSON.stringify(result, null, 2);
+}
+
+function renderToolUse(block: { id?: string; name: string; input?: Record<string, unknown> }, failedToolIds = new Set<string>()): string {
+  const input = block.input || {};
+  const failed = block.id ? failedToolIds.has(block.id) : false;
+
+  if (block.name === "Edit" && input.file_path && !failed) {
+    const oldStr = String(input.old_string || "");
+    const newStr = String(input.new_string || "");
+    const oldLines = oldStr.split("\n").map(l => `<div class="diff-del">-${esc(l)}</div>`).join("");
+    const newLines = newStr.split("\n").map(l => `<div class="diff-add">+${esc(l)}</div>`).join("");
+    return `<div class="event-tool-use">
+      <span class="tool-name">Edit</span> <span class="file-path">${esc(String(input.file_path))}</span>
+      <div class="file-diff">${oldLines}${newLines}</div>
+    </div>`;
+  }
+
+  if (block.name === "Write" && input.file_path && !failed) {
+    const content = String(input.content || "");
+    const lines = content.split("\n").map(l => `<div class="diff-add">+${esc(l)}</div>`).join("");
+    return `<div class="event-tool-use">
+      <span class="tool-name">Write</span> <span class="file-path">${esc(String(input.file_path))}</span>
+      <div class="file-diff">${lines}</div>
+    </div>`;
+  }
+
+  if (failed && (block.name === "Edit" || block.name === "Write") && input.file_path) {
+    return `<div class="event-tool-use">
+      <span class="tool-name">${esc(block.name)}</span> <span class="file-path">${esc(String(input.file_path))}</span> <span style="color:var(--red);font-size:11px">(denied)</span>
+    </div>`;
+  }
+
+  return `<div class="event-tool-use">
+    <span class="tool-name">${esc(block.name)}</span>
+    <div class="tool-input">${esc(formatToolInput(input))}</div>
+  </div>`;
 }
 
 function formatToolInput(input: unknown): string {
@@ -731,4 +799,323 @@ function renderResolvedPermission(row: PermissionRequestRow): string {
     ${row.description ? `<div class="perm-desc">${esc(row.description)}</div>` : ""}
     <div class="perm-resolved">${status}${extra}</div>
   </div>`;
+}
+
+function collectFailedToolIds(events: MessageEventRow[]): Set<string> {
+  const failed = new Set<string>();
+  for (const e of events) {
+    const data = JSON.parse(e.data);
+    if (data.type !== "user") continue;
+    const content = data.message?.content || [];
+    for (const block of content) {
+      if (block.type === "tool_result" && block.is_error) {
+        failed.add(block.tool_use_id);
+      }
+    }
+  }
+  return failed;
+}
+
+// --- Session changes ---
+
+function sessionChangesView(ctx: RouteContext) {
+  const { sid } = ctx.params;
+  const session = Sessions.getSession(sid);
+  if (!session) return { status: 404, html: "" };
+
+  const messages = Messages.listMessages(sid);
+  interface FileChange {
+    originalFile: string | null;
+    edits: Array<{ old: string; new: string }>;
+    writes: string[];
+  }
+  const fileChanges = new Map<string, FileChange>();
+
+  for (const msg of messages) {
+    const events = Messages.getAllMessageEvents(msg.id);
+    const failed = collectFailedToolIds(events);
+
+    // Map tool_use_id -> tool_use block for correlating results
+    const toolUseMap = new Map<string, { name: string; input: Record<string, unknown> }>();
+
+    for (const e of events) {
+      const data = JSON.parse(e.data);
+
+      if (data.type === "assistant") {
+        for (const block of (data.message?.content || [])) {
+          if (block.type !== "tool_use" || !block.input?.file_path) continue;
+          if (block.id && failed.has(block.id)) continue;
+          toolUseMap.set(block.id, block);
+
+          const path = block.input.file_path;
+          let entry = fileChanges.get(path);
+          if (!entry) {
+            entry = { originalFile: null, edits: [], writes: [] };
+            fileChanges.set(path, entry);
+          }
+
+          if (block.name === "Edit" && block.input.old_string && block.input.new_string) {
+            entry.edits.push({ old: block.input.old_string, new: block.input.new_string });
+          } else if (block.name === "Write" && block.input.content) {
+            entry.writes.push(block.input.content);
+          }
+        }
+      }
+
+      // Capture originalFile from Edit tool results
+      if (data.type === "user" && data.tool_use_result && typeof data.tool_use_result === "object") {
+        const result = data.tool_use_result as Record<string, unknown>;
+        if (result.filePath && result.originalFile != null) {
+          const path = String(result.filePath);
+          const entry = fileChanges.get(path);
+          if (entry && entry.originalFile === null) {
+            entry.originalFile = String(result.originalFile);
+          }
+        }
+      }
+    }
+  }
+
+  if (fileChanges.size === 0) {
+    return { status: 200, html: `<div class="diff-empty">No file changes in this session</div>` };
+  }
+
+  const parts: string[] = [];
+  for (const [path, changes] of fileChanges) {
+    let original = "";
+    let current = "";
+
+    if (changes.writes.length > 0) {
+      // File was created/written — original is empty, current is last write
+      original = "";
+      current = changes.writes[changes.writes.length - 1];
+    } else if (changes.originalFile !== null) {
+      // Have the full original from Edit tool result
+      original = changes.originalFile;
+      current = original;
+    }
+
+    // Apply edits sequentially on top of current state
+    for (const ed of changes.edits) {
+      current = current.replace(ed.old, ed.new);
+    }
+
+    // Diff original vs final
+    const origLines = original.split("\n");
+    const finalLines = current.split("\n");
+    const diffHtml = renderLineDiff(origLines, finalLines);
+
+    parts.push(`<div class="diff-file"><div class="diff-file-header">${esc(path)}</div>${diffHtml}</div>`);
+  }
+
+  return { status: 200, html: parts.join("") };
+}
+
+function renderLineDiff(origLines: string[], finalLines: string[]): string {
+  // Simple LCS-based line diff
+  const m = origLines.length;
+  const n = finalLines.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = origLines[i - 1] === finalLines[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+
+  let i = m, j = n;
+  const ops: Array<{ type: "ctx" | "del" | "add"; line: string }> = [];
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && origLines[i - 1] === finalLines[j - 1]) {
+      ops.push({ type: "ctx", line: origLines[i - 1] });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      ops.push({ type: "add", line: finalLines[j - 1] });
+      j--;
+    } else {
+      ops.push({ type: "del", line: origLines[i - 1] });
+      i--;
+    }
+  }
+  ops.reverse();
+
+  const parts: string[] = [];
+  let oldNum = 0, newNum = 0;
+  for (const op of ops) {
+    const oldLn = op.type === "add" ? "" : String(++oldNum);
+    const newLn = op.type === "del" ? "" : String(++newNum);
+    const cls = op.type === "del" ? "diff-del" : op.type === "add" ? "diff-add" : "diff-ctx";
+    const prefix = op.type === "del" ? "-" : op.type === "add" ? "+" : " ";
+    parts.push(`<div class="${cls}"><span class="diff-ln">${oldLn}</span><span class="diff-ln">${newLn}</span>${prefix}${esc(op.line)}</div>`);
+  }
+
+  return parts.join("");
+}
+
+// --- Git diff viewer ---
+
+async function gitDiffView(ctx: RouteContext) {
+  const { sid } = ctx.params;
+  const session = Sessions.getSession(sid);
+  if (!session) return { status: 404, html: "" };
+
+  const workspace = Workspaces.getWorkspace(session.workspace_id);
+  if (!workspace) return { status: 404, html: "" };
+
+  try {
+    const { stdout } = await execAsync("git diff HEAD", { cwd: workspace.cwd, maxBuffer: 1024 * 1024 * 5 });
+    const diffHtml = stdout.trim() ? renderDiff(stdout) : `<div class="diff-empty">No changes</div>`;
+    return { status: 200, html: diffHtml };
+  } catch {
+    return { status: 200, html: `<div class="diff-empty">Not a git repository</div>` };
+  }
+}
+
+function renderDiff(raw: string): string {
+  const lines = raw.split("\n");
+  const parts: string[] = [];
+  let inFile = false;
+  let fileName = "";
+
+  for (const line of lines) {
+    if (line.startsWith("diff --git")) {
+      if (inFile) parts.push("</div>");
+      const match = line.match(/b\/(.+)$/);
+      fileName = match ? match[1] : line;
+      parts.push(`<div class="diff-file"><div class="diff-file-header">${esc(fileName)}</div>`);
+      inFile = true;
+    } else if (line.startsWith("@@")) {
+      const hunkMatch = line.match(/^@@\s+(.+?)\s+@@\s*(.*)/);
+      const range = hunkMatch ? hunkMatch[1] : line;
+      const ctx = hunkMatch?.[2] || "";
+      parts.push(`<div class="diff-hunk">${esc(range)} ${esc(ctx)}</div>`);
+    } else if (line.startsWith("+") && !line.startsWith("+++")) {
+      parts.push(`<div class="diff-add">${esc(line)}</div>`);
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      parts.push(`<div class="diff-del">${esc(line)}</div>`);
+    } else if (line.startsWith("index ") || line.startsWith("---") || line.startsWith("+++") || line.startsWith("new file") || line.startsWith("deleted file")) {
+      // skip meta lines
+    } else {
+      parts.push(`<div class="diff-ctx">${esc(line)}</div>`);
+    }
+  }
+  if (inFile) parts.push("</div>");
+
+  return parts.join("\n");
+}
+
+// --- File browser ---
+
+async function fileBrowserView(ctx: RouteContext) {
+  const { sid } = ctx.params;
+  const session = Sessions.getSession(sid);
+  if (!session) return { status: 404, html: "" };
+
+  const workspace = Workspaces.getWorkspace(session.workspace_id);
+  if (!workspace) return { status: 404, html: "" };
+
+  const subdir = ctx.query.path || "";
+  const showHidden = ctx.query.hidden === "true";
+  const open = subdir ? [subdir] : [];
+
+  const { readdir, stat } = await import("node:fs/promises");
+  const { join, relative } = await import("node:path");
+
+  const root = workspace.cwd;
+  const absDir = subdir ? join(root, subdir) : root;
+  const rel = subdir ? relative(root, absDir) : "";
+  if (rel.startsWith("..")) return { status: 400, html: "" };
+
+  try {
+    let entries = await readdir(absDir, { withFileTypes: true });
+    if (!showHidden) entries = entries.filter(e => !e.name.startsWith("."));
+    entries.sort((a, b) => {
+      if (a.isDirectory() && !b.isDirectory()) return -1;
+      if (!a.isDirectory() && b.isDirectory()) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    const items = await Promise.all(entries.map(async e => {
+      let size = "";
+      try {
+        const s = await stat(join(absDir, e.name));
+        if (s.isFile()) size = formatSize(s.size);
+      } catch {}
+      const isDir = e.isDirectory();
+      const childPath = subdir ? subdir + "/" + e.name : e.name;
+      if (isDir) {
+        return `<div class="fb-item fb-dir" onclick="browseDir('${esc(childPath)}')">
+          <span class="fb-icon">&#128193;</span> ${esc(e.name)}/
+        </div>`;
+      }
+      return `<div class="fb-item fb-file" onclick="viewFile('${esc(childPath)}')" style="cursor:pointer">
+        <span class="fb-icon">&middot;</span> ${esc(e.name)} <span class="fb-size">${size}</span>
+      </div>`;
+    }));
+
+    // Breadcrumbs
+    const pathParts = subdir ? subdir.split("/").filter(Boolean) : [];
+    let crumbs = `<span class="fb-crumb" onclick="browseDir('')">${esc(workspace.name)}</span>`;
+    let built = "";
+    for (const p of pathParts) {
+      built += (built ? "/" : "") + p;
+      const target = built;
+      crumbs += ` / <span class="fb-crumb" onclick="browseDir('${esc(target)}')">${esc(p)}</span>`;
+    }
+
+    return {
+      status: 200,
+      html: `<div class="fb-path">${crumbs}</div>
+        <div class="fb-list">${items.join("")}</div>`,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to read directory";
+    return { status: 200, html: `<div class="diff-empty">${esc(msg)}</div>` };
+  }
+}
+
+async function fileContentView(ctx: RouteContext) {
+  const { sid } = ctx.params;
+  const session = Sessions.getSession(sid);
+  if (!session) return { status: 404, html: "" };
+
+  const workspace = Workspaces.getWorkspace(session.workspace_id);
+  if (!workspace) return { status: 404, html: "" };
+
+  const filePath = ctx.query.path;
+  if (!filePath) return { status: 400, html: "" };
+
+  const { join, relative } = await import("node:path");
+  const { readFile } = await import("node:fs/promises");
+
+  const absPath = join(workspace.cwd, filePath);
+  const rel = relative(workspace.cwd, absPath);
+  if (rel.startsWith("..")) return { status: 400, html: "" };
+
+  const breadcrumbs = `<div class="fb-path"><span class="fb-crumb" onclick="browseDir('')">${esc(workspace.name)}</span>${filePath.split("/").filter(Boolean).reduce((acc: string, p: string, i: number, arr: string[]) => {
+    const partial = arr.slice(0, i + 1).join("/");
+    if (i === arr.length - 1) return acc + ` / <span>${esc(p)}</span>`;
+    return acc + ` / <span class="fb-crumb" onclick="browseDir('${esc(partial)}')">${esc(p)}</span>`;
+  }, "")}</div>`;
+
+  try {
+    const content = await readFile(absPath, "utf-8");
+    const lines = content.split("\n");
+    const numbered = lines.map((l, i) =>
+      `<div class="diff-ctx"><span class="diff-ln">${i + 1}</span> ${esc(l)}</div>`
+    ).join("");
+    return {
+      status: 200,
+      html: `${breadcrumbs}<div class="diff-body" style="flex:1;overflow:auto;font-family:var(--mono);font-size:12px;line-height:1.6">${numbered}</div>`,
+    };
+  } catch {
+    return { status: 200, html: `${breadcrumbs}<div class="diff-empty">Unable to read file</div>` };
+  }
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }

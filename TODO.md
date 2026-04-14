@@ -9,8 +9,9 @@
 - [x] Chat "streaming/pending" status indicator disappears too early — keep visible until message is complete
 - [x] Show tool use events in message feed (currently only assistant text and results render)
 - [x] Make mobile friendly with hamburger menu
-- [ ] File explorer
-- [ ] Diff viewer 
+- [ ] File browser UI (using existing `/api/v1/files/list` endpoint)
+- [x] Changed files per message — parse Edit/Write/Read tool events to show touched files with inline diffs
+- [ ] Git diff viewer — run `git diff` in workspace cwd, render unified diff with syntax coloring
 - [x] Allowed tools whitelisting in execute dialog
 - [ ] File upload/download
 - [x] Formatting of responses. ``` should be a code block?
