@@ -19,7 +19,20 @@ export function initDb(dbPath: string = "ayseepee.db"): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   runMigrations(db);
+  cleanupStaleQueries(db);
   return db;
+}
+
+function cleanupStaleQueries(db: Database.Database): void {
+  const stale = db.prepare(
+    "UPDATE messages SET status = 'error', error = 'interrupted', completed_at = datetime('now') WHERE status IN ('pending', 'streaming')"
+  ).run();
+  db.prepare(
+    "UPDATE sessions SET status = 'idle', last_active_at = datetime('now') WHERE status = 'active'"
+  ).run();
+  if (stale.changes > 0) {
+    console.log(`Cleaned up ${stale.changes} stale message(s) from previous run`);
+  }
 }
 
 function runMigrations(db: Database.Database): void {

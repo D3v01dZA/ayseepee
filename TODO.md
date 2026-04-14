@@ -19,7 +19,8 @@
 ## Misc
 - [ ] Use https://github.com/JuliusBrussee/caveman
 - [x] Fix the types for controllers, strongly define what each input/output type looks like
-- [ ] Message queueing?
-- [ ] Message interrupt?
+- [x] Message queueing?
+- [x] Message interrupt?
+- [x] Clean up stale queries on startup
 - [ ] Tool interrupting seems to break everything?
 - [ ] Make sure the API and Views can do the same "stuff"
